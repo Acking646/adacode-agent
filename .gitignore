@@ -13,5 +13,7 @@ checkpoints/
 models/*
 !models/.gitkeep
 data/private/
+file_list_abs.txt
+all_files.txt
 *.mp4
 *.zip
