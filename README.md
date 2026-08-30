@@ -83,7 +83,7 @@ Do not put real API keys in source files, README files, videos, or commits.
 
 ## Context Manager Training
 
-The planned trained manager is `Qwen3-0.6B` with LoRA SFT. It learns JSON context
+The planned trained manager is `Qwen3-4B` with LoRA SFT. It learns JSON context
 selection rather than code editing:
 
 ```json
@@ -104,7 +104,13 @@ python -m training.build_sft_dataset --trace examples/demo_project/.adacode/traj
 Train the optional manager adapter:
 
 ```bash
-python -m training.train_manager --model Qwen/Qwen3-0.6B --data data/sft/context_manager_sft.jsonl
+python -m training.train_manager --model_name_or_path models/Qwen3-4B --data_path data/sft/context_manager_sft.jsonl
+```
+
+Server-style launch:
+
+```bash
+nohup bash -c 'CUDA_VISIBLE_DEVICES=0,1 MODEL_PATH=/path/to/Qwen3-4B DATA_PATH=/path/to/context_manager_sft.jsonl OUTPUT_DIR=/path/to/Qwen3-4B-ContextManager-LoRA NPROC=2 bash scripts/train_qwen3_4b_context_manager.sh' > train_qwen3_4b_context_manager.log 2>&1 &
 ```
 
 ## Evaluation Plan

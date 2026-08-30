@@ -33,7 +33,7 @@ The manager builds candidates from:
 - relevant code/test snippets
 
 The default selector is a local reward scorer. A SFT manager can replace it by
-serving a fine-tuned Qwen3-0.6B model behind an OpenAI-compatible endpoint.
+serving a fine-tuned Qwen3-4B model behind an OpenAI-compatible endpoint.
 
 ## Training Target
 
@@ -56,4 +56,3 @@ The SFT model learns this JSON schema:
 
 This keeps training focused on context management rather than delegating coding
 or tool execution to a framework.
-

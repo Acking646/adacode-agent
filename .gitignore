@@ -10,6 +10,8 @@ env/
 *.log
 outputs/
 checkpoints/
+models/*
+!models/.gitkeep
 data/private/
 *.mp4
 *.zip
