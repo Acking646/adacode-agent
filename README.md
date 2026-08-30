@@ -60,6 +60,16 @@ python -m agent.main "Fix the project so tests pass." --workspace examples/demo_
 For DeepSeek, Qwen, or other compatible providers, set `OPENAI_BASE_URL` and
 `--model` to the provider's values.
 
+Example with SiliconFlow:
+
+```bash
+set SILICONFLOW_API_KEY=your_key
+set OPENAI_BASE_URL=https://api.siliconflow.cn/v1
+python -m agent.main "Fix the project so tests pass." --workspace examples/demo_project --model deepseek-ai/DeepSeek-V4-Flash
+```
+
+Do not put real API keys in source files, README files, videos, or commits.
+
 ## Modules
 
 - `agent/controller.py`: agent loop and termination control
@@ -69,6 +79,7 @@ For DeepSeek, Qwen, or other compatible providers, set `OPENAI_BASE_URL` and
 - `agent/memory.py`: CRUD memory cards
 - `training/train_manager.py`: SFT for the context manager
 - `benchmark/run_benchmark.py`: mini coding benchmark evaluation
+- `docs/provider_setup.md`: OpenAI-compatible provider configuration
 
 ## Context Manager Training
 

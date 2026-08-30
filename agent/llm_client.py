@@ -30,12 +30,17 @@ class OpenAICompatibleClient:
     timeout: int = 60
 
     def __post_init__(self) -> None:
-        self.api_key = self.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("LLM_API_KEY")
+        self.api_key = (
+            self.api_key
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("LLM_API_KEY")
+            or os.getenv("SILICONFLOW_API_KEY")
+        )
         self.base_url = (self.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
 
     def complete(self, messages: List[Message]) -> str:
         if not self.api_key:
-            raise RuntimeError("Missing API key. Set OPENAI_API_KEY or LLM_API_KEY.")
+            raise RuntimeError("Missing API key. Set OPENAI_API_KEY, LLM_API_KEY, or SILICONFLOW_API_KEY.")
 
         body = {
             "model": self.model,
