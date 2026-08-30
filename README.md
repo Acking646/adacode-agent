@@ -23,7 +23,44 @@ select compact, task-relevant context before each model call.
 - API keys and credentials must be provided through environment variables or
   ignored local config files.
 
-## Planned Modules
+## Quick Start
+
+Install the optional test dependency:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run unit tests:
+
+```bash
+python -m pytest -q
+```
+
+Run standard-library smoke tests:
+
+```bash
+python tests/smoke_test.py
+```
+
+Run a deterministic no-API demo:
+
+```bash
+python -m agent.demo
+```
+
+Run the agent on a workspace with an OpenAI-compatible model:
+
+```bash
+set OPENAI_API_KEY=your_key
+set OPENAI_BASE_URL=https://api.openai.com/v1
+python -m agent.main "Fix the project so tests pass." --workspace examples/demo_project --model gpt-4o-mini
+```
+
+For DeepSeek, Qwen, or other compatible providers, set `OPENAI_BASE_URL` and
+`--model` to the provider's values.
+
+## Modules
 
 - `agent/controller.py`: agent loop and termination control
 - `agent/tools.py`: local file and command tools
@@ -33,3 +70,50 @@ select compact, task-relevant context before each model call.
 - `training/train_manager.py`: SFT for the context manager
 - `benchmark/run_benchmark.py`: mini coding benchmark evaluation
 
+## Context Manager Training
+
+The planned trained manager is `Qwen3-0.6B` with LoRA SFT. It learns JSON context
+selection rather than code editing:
+
+```json
+{
+  "keep": ["task_goal", "mem_0001", "error_0002"],
+  "drop": ["old_stdout_0001"],
+  "update_memory": [],
+  "reason": "Keep the failed test and relevant file path."
+}
+```
+
+Build bootstrapped SFT data from trajectories:
+
+```bash
+python -m training.build_sft_dataset --trace examples/demo_project/.adacode/trajectory.jsonl --output data/sft/context_manager_sft.jsonl
+```
+
+Train the optional manager adapter:
+
+```bash
+python -m training.train_manager --model Qwen/Qwen3-0.6B --data data/sft/context_manager_sft.jsonl
+```
+
+## Evaluation Plan
+
+The main benchmark is `MiniCodeBench-CM`, a small controlled set of coding tasks
+with tests. SWE-Bench Lite or Verified can be used later as a smoke test for
+real-world issue repair, but not as the main short-term training set.
+
+Compare these settings:
+
+- Full history
+- Sliding window
+- Rule-based context manager
+- SFT context manager
+
+Metrics:
+
+- pass rate
+- average steps
+- average prompt tokens
+- compression ratio
+- JSON parse error rate
+- critical information drop rate

@@ -1,0 +1,2 @@
+Fix the divide function so all tests pass. Preserve normal division behavior and return None when the divisor is zero.
+

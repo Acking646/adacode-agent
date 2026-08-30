@@ -1,0 +1,2 @@
+Fix the slugify function so it passes the tests. It should lowercase text, trim surrounding separators, collapse repeated separators, and remove punctuation.
+
