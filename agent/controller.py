@@ -28,7 +28,11 @@ class CodingAgent:
         self.config = config
         self.workspace = config.workspace.resolve()
         self.memory = MemoryStore(config.memory_path or self.workspace / ".adacode" / "memory.json")
-        self.context_manager = context_manager or ContextManager(self.memory, token_budget=config.token_budget)
+        if context_manager is None:
+            self.context_manager = ContextManager(self.memory, token_budget=config.token_budget)
+        else:
+            self.context_manager = context_manager
+            self.memory = context_manager.memory
         self.tools = ToolExecutor(self.workspace)
         self.history: List[Message] = []
         self.step_index = 0

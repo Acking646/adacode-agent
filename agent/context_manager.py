@@ -150,7 +150,12 @@ class ContextManager:
 
     def assemble(self, task: str, history: List[Message]) -> Tuple[List[Message], ContextSelection]:
         candidates = self.build_candidates(task, history)
-        selection = self.selector.select(task, candidates, self.token_budget)
+        try:
+            selection = self.selector.select(task, candidates, self.token_budget)
+        except Exception as exc:
+            fallback = RuleBasedSelectionModel()
+            selection = fallback.select(task, candidates, self.token_budget)
+            selection.reason = f"Context manager failed ({type(exc).__name__}: {exc}); fell back to rule scoring."
         by_id = {candidate.id: candidate for candidate in candidates}
         selected = [by_id[item] for item in selection.keep if item in by_id]
 
