@@ -79,7 +79,7 @@ def run_git_with_retry(
         last = run(git_command(git_proxy, args), cwd=cwd, timeout=timeout, env=git_env())
         if last.returncode == 0:
             return last
-        print(f"[WARN] git {' '.join(args[:2])} failed attempt {attempt}/{retries}:\n{last.stdout}", file=sys.stderr)
+        print(f"[WARN] git {' '.join(args[:2])} failed attempt {attempt}/{retries}:\n{last.stdout}", file=sys.stderr, flush=True)
     assert last is not None
     return last
 
@@ -180,7 +180,7 @@ def run_agent(
             command.extend(["--cm-base-url", cm_base_url])
     completed = run(command, cwd=Path.cwd(), timeout=1800)
     if completed.returncode != 0:
-        print(f"[WARN] agent failed for {row['instance_id']}:\n{completed.stdout}", file=sys.stderr)
+        print(f"[WARN] agent failed for {row['instance_id']}:\n{completed.stdout}", file=sys.stderr, flush=True)
     return completed.stdout
 
 
@@ -222,7 +222,7 @@ def main() -> None:
     with args.predictions.open("w", encoding="utf-8") as fh:
         for index, row in enumerate(rows, start=1):
             instance_id = row["instance_id"]
-            print(f"[{index}/{len(rows)}] {instance_id}")
+            print(f"[{index}/{len(rows)}] {instance_id}", flush=True)
             try:
                 workspace = clone_instance(row, args.work_root, args.git_proxy, args.git_retries, args.git_timeout)
                 run_agent(
@@ -238,7 +238,7 @@ def main() -> None:
                 )
                 patch = git_diff(workspace)
             except Exception as exc:
-                print(f"[WARN] failed {instance_id}: {exc}", file=sys.stderr)
+                print(f"[WARN] failed {instance_id}: {exc}", file=sys.stderr, flush=True)
                 patch = ""
             record = {
                 "instance_id": instance_id,
@@ -247,8 +247,8 @@ def main() -> None:
             }
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             fh.flush()
-            print(f"patch_chars={len(patch)}")
-    print(f"Wrote predictions to {args.predictions}")
+            print(f"patch_chars={len(patch)}", flush=True)
+    print(f"Wrote predictions to {args.predictions}", flush=True)
 
 
 if __name__ == "__main__":
