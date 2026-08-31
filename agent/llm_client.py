@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -27,7 +28,9 @@ class OpenAICompatibleClient:
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     temperature: float = 0.0
-    timeout: int = 60
+    timeout: int = 180
+    retries: int = 3
+    retry_sleep: float = 5.0
 
     def __post_init__(self) -> None:
         self.api_key = (
@@ -37,6 +40,8 @@ class OpenAICompatibleClient:
             or os.getenv("SILICONFLOW_API_KEY")
         )
         self.base_url = (self.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        self.timeout = int(os.getenv("ADACODE_LLM_TIMEOUT", str(self.timeout)))
+        self.retries = int(os.getenv("ADACODE_LLM_RETRIES", str(self.retries)))
 
     def complete(self, messages: List[Message]) -> str:
         if not self.api_key:
@@ -57,14 +62,22 @@ class OpenAICompatibleClient:
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            details = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"LLM HTTP error {exc.code}: {details}") from exc
+        last_error: Optional[BaseException] = None
+        for attempt in range(1, self.retries + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                return payload["choices"][0]["message"]["content"]
+            except urllib.error.HTTPError as exc:
+                details = exc.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"LLM HTTP error {exc.code}: {details}") from exc
+            except (TimeoutError, urllib.error.URLError) as exc:
+                last_error = exc
+                if attempt >= self.retries:
+                    break
+                time.sleep(self.retry_sleep)
 
-        return payload["choices"][0]["message"]["content"]
+        raise RuntimeError(f"LLM request failed after {self.retries} attempts: {last_error}")
 
 
 class ScriptedClient:

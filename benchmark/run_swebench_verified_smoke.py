@@ -150,6 +150,8 @@ def run_agent(
     cm_model: str,
     cm_base_url: Optional[str],
     cm_api_key: str,
+    llm_timeout: int,
+    llm_retries: int,
 ) -> str:
     task = (
         "Resolve this SWE-Bench issue. Edit the repository files locally and finish when a patch is ready.\n\n"
@@ -169,6 +171,10 @@ def run_agent(
         model,
         "--max-steps",
         str(max_steps),
+        "--llm-timeout",
+        str(llm_timeout),
+        "--llm-retries",
+        str(llm_retries),
         "--trace",
         str(trace_path),
         "--cm-mode",
@@ -208,6 +214,8 @@ def main() -> None:
     parser.add_argument("--git-proxy", default=os.environ.get("GIT_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY"))
     parser.add_argument("--git-retries", type=int, default=int(os.environ.get("GIT_RETRIES", "3")))
     parser.add_argument("--git-timeout", type=int, default=int(os.environ.get("GIT_TIMEOUT", "900")))
+    parser.add_argument("--llm-timeout", type=int, default=int(os.environ.get("ADACODE_LLM_TIMEOUT", "180")))
+    parser.add_argument("--llm-retries", type=int, default=int(os.environ.get("ADACODE_LLM_RETRIES", "3")))
     args = parser.parse_args()
 
     ids = load_instance_ids(args.instances)
@@ -235,6 +243,8 @@ def main() -> None:
                     args.cm_model,
                     args.cm_base_url,
                     args.cm_api_key,
+                    args.llm_timeout,
+                    args.llm_retries,
                 )
                 patch = git_diff(workspace)
             except Exception as exc:
