@@ -19,6 +19,8 @@ echo "Dataset: $DATASET_ID"
 echo "Output:  $OUT_DIR"
 echo "HF_HOME: $HF_HOME"
 echo "HF_ENDPOINT: $HF_ENDPOINT"
+echo "http_proxy: ${http_proxy:-${HTTP_PROXY:-}}"
+echo "https_proxy: ${https_proxy:-${HTTPS_PROXY:-}}"
 
 python - <<'PY'
 import importlib.util
@@ -31,6 +33,7 @@ if missing:
     sys.exit(1)
 PY
 
+if [ -z "${SKIP_DNS_CHECK:-}" ] && [ -z "${http_proxy:-${HTTP_PROXY:-}}" ] && [ -z "${https_proxy:-${HTTPS_PROXY:-}}" ]; then
 python - <<'PY'
 import os
 import socket
@@ -49,6 +52,9 @@ except socket.gaierror as exc:
     )
 print(f"DNS check passed for {host}")
 PY
+else
+  echo "Skipping direct DNS check because proxy is configured or SKIP_DNS_CHECK is set."
+fi
 
 attempt=1
 while [ "$attempt" -le "$RETRIES" ]; do
