@@ -54,6 +54,34 @@ pip install datasets huggingface_hub
 DATA_ROOT=./data/open bash scripts/download_open_datasets.sh
 ```
 
+After downloading SWE-smith trajectories, inspect the local files:
+
+```bash
+python -m training.inspect_swesmith \
+  --input-dir data/open/SWE-smith-trajectories \
+  --split xml \
+  --rows 2
+```
+
+Build SFT data:
+
+```bash
+python -m training.build_sft_from_swesmith \
+  --input-dir data/open/SWE-smith-trajectories \
+  --split xml \
+  --max-samples 500 \
+  --output data/sft/context_manager_sft.jsonl
+```
+
+Evaluate no-training baselines:
+
+```bash
+python -m training.evaluate_context_selection \
+  --data data/sft/context_manager_sft.jsonl \
+  --modes full sliding rule \
+  --token-budget 3500
+```
+
 For SWE-Bench evaluation:
 
 ```bash
@@ -62,4 +90,3 @@ cd ../SWE-bench
 pip install -e .
 swebench eval verified --gold -i sympy__sympy-20590 --run-id validate-gold
 ```
-
