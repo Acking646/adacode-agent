@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 
-def run(command: List[str], cwd: Optional[Path] = None, timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+def run(
+    command: List[str],
+    cwd: Optional[Path] = None,
+    timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         command,
         cwd=str(cwd) if cwd else None,
@@ -18,6 +23,7 @@ def run(command: List[str], cwd: Optional[Path] = None, timeout: Optional[int] =
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=timeout,
+        env=env,
         shell=False,
     )
 
@@ -46,13 +52,39 @@ def load_instance_ids(path: Optional[Path]) -> Optional[List[str]]:
 
 def git_command(git_proxy: Optional[str], args: List[str]) -> List[str]:
     command = ["git"]
+    command.extend(["-c", "http.version=HTTP/1.1", "-c", "http.lowSpeedLimit=0"])
     if git_proxy:
         command.extend(["-c", f"http.proxy={git_proxy}", "-c", f"https.proxy={git_proxy}"])
     command.extend(args)
     return command
 
 
-def clone_instance(row: Dict, work_root: Path, git_proxy: Optional[str]) -> Path:
+def git_env() -> Dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    env.setdefault("GIT_HTTP_LOW_SPEED_LIMIT", "0")
+    env.setdefault("GIT_HTTP_LOW_SPEED_TIME", "999999")
+    return env
+
+
+def run_git_with_retry(
+    git_proxy: Optional[str],
+    args: List[str],
+    cwd: Optional[Path],
+    timeout: int,
+    retries: int,
+) -> subprocess.CompletedProcess:
+    last = None
+    for attempt in range(1, retries + 1):
+        last = run(git_command(git_proxy, args), cwd=cwd, timeout=timeout, env=git_env())
+        if last.returncode == 0:
+            return last
+        print(f"[WARN] git {' '.join(args[:2])} failed attempt {attempt}/{retries}:\n{last.stdout}", file=sys.stderr)
+    assert last is not None
+    return last
+
+
+def clone_instance(row: Dict, work_root: Path, git_proxy: Optional[str], git_retries: int, git_timeout: int) -> Path:
     repo = row["repo"]
     base_commit = row["base_commit"]
     instance_id = row["instance_id"]
@@ -60,15 +92,49 @@ def clone_instance(row: Dict, work_root: Path, git_proxy: Optional[str]) -> Path
     if target.exists():
         shutil.rmtree(str(target))
     url = f"https://github.com/{repo}.git"
-    completed = run(git_command(git_proxy, ["clone", "--no-tags", "--depth", "1", url, str(target)]), timeout=900)
+    completed = run_git_with_retry(
+        git_proxy,
+        ["clone", "--no-tags", "--filter=blob:none", "--depth", "1", url, str(target)],
+        cwd=None,
+        timeout=git_timeout,
+        retries=git_retries,
+    )
     if completed.returncode != 0:
-        completed = run(git_command(git_proxy, ["clone", "--no-tags", url, str(target)]), timeout=1800)
+        if target.exists():
+            shutil.rmtree(str(target))
+        completed = run_git_with_retry(
+            git_proxy,
+            ["clone", "--no-tags", url, str(target)],
+            cwd=None,
+            timeout=max(git_timeout * 2, 1800),
+            retries=git_retries,
+        )
     if completed.returncode != 0:
         raise RuntimeError(f"git clone failed for {repo}:\n{completed.stdout}")
-    completed = run(git_command(git_proxy, ["fetch", "--depth", "1", "origin", base_commit]), cwd=target, timeout=900)
+    completed = run_git_with_retry(
+        git_proxy,
+        ["fetch", "--depth", "1", "origin", base_commit],
+        cwd=target,
+        timeout=git_timeout,
+        retries=git_retries,
+    )
     if completed.returncode != 0:
-        run(git_command(git_proxy, ["fetch", "origin", base_commit]), cwd=target, timeout=1800)
-    completed = run(git_command(git_proxy, ["checkout", base_commit]), cwd=target, timeout=120)
+        completed = run_git_with_retry(
+            git_proxy,
+            ["fetch", "origin", base_commit],
+            cwd=target,
+            timeout=max(git_timeout * 2, 1800),
+            retries=git_retries,
+        )
+    if completed.returncode != 0:
+        raise RuntimeError(f"git fetch failed for {instance_id}:\n{completed.stdout}")
+    completed = run_git_with_retry(
+        git_proxy,
+        ["checkout", "--force", base_commit],
+        cwd=target,
+        timeout=git_timeout,
+        retries=git_retries,
+    )
     if completed.returncode != 0:
         raise RuntimeError(f"git checkout failed for {instance_id}:\n{completed.stdout}")
     return target
@@ -140,6 +206,8 @@ def main() -> None:
     parser.add_argument("--cm-base-url", default=os.environ.get("ADACODE_CM_BASE_URL"))
     parser.add_argument("--cm-api-key", default=os.environ.get("ADACODE_CM_API_KEY", "EMPTY"))
     parser.add_argument("--git-proxy", default=os.environ.get("GIT_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY"))
+    parser.add_argument("--git-retries", type=int, default=int(os.environ.get("GIT_RETRIES", "3")))
+    parser.add_argument("--git-timeout", type=int, default=int(os.environ.get("GIT_TIMEOUT", "900")))
     args = parser.parse_args()
 
     ids = load_instance_ids(args.instances)
@@ -156,7 +224,7 @@ def main() -> None:
             instance_id = row["instance_id"]
             print(f"[{index}/{len(rows)}] {instance_id}")
             try:
-                workspace = clone_instance(row, args.work_root, args.git_proxy)
+                workspace = clone_instance(row, args.work_root, args.git_proxy, args.git_retries, args.git_timeout)
                 run_agent(
                     row,
                     workspace,
