@@ -90,3 +90,20 @@ cd ../SWE-bench
 pip install -e .
 swebench eval verified --gold -i sympy__sympy-20590 --run-id validate-gold
 ```
+
+Download SWE-Bench Verified for public smoke tests:
+
+```bash
+HF_ENDPOINT=https://huggingface.co \
+MAX_WORKERS=1 \
+bash scripts/download_swebench_verified_resumable.sh
+```
+
+Prepare a small instance list:
+
+```bash
+python -m benchmark.prepare_swebench_verified_sample \
+  --data data/open/SWE-bench_Verified/test.jsonl \
+  --limit 10 \
+  --output data/open/SWE-bench_Verified/sample_instances.txt
+```
