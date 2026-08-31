@@ -131,7 +131,20 @@ def heuristic_keep(candidates: List[Dict[str, str]], token_budget: int) -> List[
     return keep
 
 
-def convert(input_dir: Path, output: Path, split: str, max_samples: int, max_candidates: int, chunk_chars: int, token_budget: int) -> None:
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def convert(
+    input_dir: Path,
+    output: Path,
+    split: str,
+    max_samples: int,
+    max_candidates: int,
+    chunk_chars: int,
+    token_budget: int,
+    min_full_tokens: int,
+) -> None:
     try:
         from datasets import load_dataset
     except ImportError as exc:
@@ -150,10 +163,17 @@ def convert(input_dir: Path, output: Path, split: str, max_samples: int, max_can
 
     output.parent.mkdir(parents=True, exist_ok=True)
     count = 0
+    skipped_short = 0
+    scanned = 0
     with output.open("w", encoding="utf-8") as fh:
         for row in dataset:
+            scanned += 1
             candidates = make_candidates(row, max_candidates=max_candidates, chunk_chars=chunk_chars)
             if len(candidates) < 2:
+                continue
+            full_tokens = sum(estimate_tokens(candidate["content"]) for candidate in candidates)
+            if min_full_tokens and full_tokens < min_full_tokens:
+                skipped_short += 1
                 continue
             keep = heuristic_keep(candidates, token_budget)
             drop = [candidate["id"] for candidate in candidates if candidate["id"] not in keep]
@@ -176,7 +196,7 @@ def convert(input_dir: Path, output: Path, split: str, max_samples: int, max_can
             count += 1
             if max_samples and count >= max_samples:
                 break
-    print(f"Wrote {count} samples to {output}")
+    print(f"Scanned {scanned} rows; skipped_short={skipped_short}; wrote {count} samples to {output}")
 
 
 def infer_last_error(candidates: List[Dict[str, str]]) -> str:
@@ -197,10 +217,19 @@ def main() -> None:
     parser.add_argument("--max-candidates", type=int, default=24)
     parser.add_argument("--chunk-chars", type=int, default=1800)
     parser.add_argument("--token-budget", type=int, default=3500)
+    parser.add_argument("--min-full-tokens", type=int, default=0)
     args = parser.parse_args()
-    convert(args.input_dir, args.output, args.split, args.max_samples, args.max_candidates, args.chunk_chars, args.token_budget)
+    convert(
+        args.input_dir,
+        args.output,
+        args.split,
+        args.max_samples,
+        args.max_candidates,
+        args.chunk_chars,
+        args.token_budget,
+        args.min_full_tokens,
+    )
 
 
 if __name__ == "__main__":
     main()
-
