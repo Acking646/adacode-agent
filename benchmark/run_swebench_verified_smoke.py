@@ -44,7 +44,15 @@ def load_instance_ids(path: Optional[Path]) -> Optional[List[str]]:
     return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def clone_instance(row: Dict, work_root: Path) -> Path:
+def git_command(git_proxy: Optional[str], args: List[str]) -> List[str]:
+    command = ["git"]
+    if git_proxy:
+        command.extend(["-c", f"http.proxy={git_proxy}", "-c", f"https.proxy={git_proxy}"])
+    command.extend(args)
+    return command
+
+
+def clone_instance(row: Dict, work_root: Path, git_proxy: Optional[str]) -> Path:
     repo = row["repo"]
     base_commit = row["base_commit"]
     instance_id = row["instance_id"]
@@ -52,15 +60,15 @@ def clone_instance(row: Dict, work_root: Path) -> Path:
     if target.exists():
         shutil.rmtree(str(target))
     url = f"https://github.com/{repo}.git"
-    completed = run(["git", "clone", "--no-tags", "--depth", "1", url, str(target)], timeout=900)
+    completed = run(git_command(git_proxy, ["clone", "--no-tags", "--depth", "1", url, str(target)]), timeout=900)
     if completed.returncode != 0:
-        completed = run(["git", "clone", "--no-tags", url, str(target)], timeout=1800)
+        completed = run(git_command(git_proxy, ["clone", "--no-tags", url, str(target)]), timeout=1800)
     if completed.returncode != 0:
         raise RuntimeError(f"git clone failed for {repo}:\n{completed.stdout}")
-    completed = run(["git", "fetch", "--depth", "1", "origin", base_commit], cwd=target, timeout=900)
+    completed = run(git_command(git_proxy, ["fetch", "--depth", "1", "origin", base_commit]), cwd=target, timeout=900)
     if completed.returncode != 0:
-        run(["git", "fetch", "origin", base_commit], cwd=target, timeout=1800)
-    completed = run(["git", "checkout", base_commit], cwd=target, timeout=120)
+        run(git_command(git_proxy, ["fetch", "origin", base_commit]), cwd=target, timeout=1800)
+    completed = run(git_command(git_proxy, ["checkout", base_commit]), cwd=target, timeout=120)
     if completed.returncode != 0:
         raise RuntimeError(f"git checkout failed for {instance_id}:\n{completed.stdout}")
     return target
@@ -131,6 +139,7 @@ def main() -> None:
     parser.add_argument("--cm-model", default=os.environ.get("ADACODE_CM_MODEL", "qwen3-4b-cm"))
     parser.add_argument("--cm-base-url", default=os.environ.get("ADACODE_CM_BASE_URL"))
     parser.add_argument("--cm-api-key", default=os.environ.get("ADACODE_CM_API_KEY", "EMPTY"))
+    parser.add_argument("--git-proxy", default=os.environ.get("GIT_PROXY") or os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY"))
     args = parser.parse_args()
 
     ids = load_instance_ids(args.instances)
@@ -147,7 +156,7 @@ def main() -> None:
             instance_id = row["instance_id"]
             print(f"[{index}/{len(rows)}] {instance_id}")
             try:
-                workspace = clone_instance(row, args.work_root)
+                workspace = clone_instance(row, args.work_root, args.git_proxy)
                 run_agent(
                     row,
                     workspace,
