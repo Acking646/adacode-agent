@@ -107,3 +107,23 @@ python -m benchmark.prepare_swebench_verified_sample \
   --limit 10 \
   --output data/open/SWE-bench_Verified/sample_instances.txt
 ```
+
+Generate baseline predictions with the untrained context manager:
+
+```bash
+python -m benchmark.run_swebench_verified_smoke \
+  --data data/open/SWE-bench_Verified/test.jsonl \
+  --instances data/open/SWE-bench_Verified/sample_instances.txt \
+  --limit 3 \
+  --model deepseek-ai/DeepSeek-V4-Flash \
+  --predictions outputs/swebench_verified_predictions.jsonl
+```
+
+Evaluate with the official SWE-Bench harness:
+
+```bash
+swebench eval verified \
+  -p outputs/swebench_verified_predictions.jsonl \
+  --run-id adacode_base_rule_cm \
+  -j 2
+```
