@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 from pathlib import Path
 
@@ -9,6 +10,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="LoRA SFT for Qwen3-4B context manager.")
     parser.add_argument("--model", "--model_name_or_path", dest="model", default="models/Qwen3-4B")
     parser.add_argument("--data", "--data_path", dest="data", default="data/sft/context_manager_sft.jsonl")
+    parser.add_argument("--eval-data", "--eval_data_path", dest="eval_data", default=None)
     parser.add_argument("--output", "--output_dir", dest="output", default="checkpoints/qwen3-4b-context-manager")
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--epochs", type=float, default=3.0)
@@ -30,7 +32,8 @@ def main() -> None:
     try:
         from datasets import load_dataset
         from peft import LoraConfig, get_peft_model
-        from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorForLanguageModeling, Trainer, TrainingArguments
+        from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+        import torch
     except ImportError as exc:
         raise SystemExit(
             "Missing training dependencies. Install optional packages first:\n"
@@ -41,7 +44,10 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = load_dataset("json", data_files=str(Path(args.data)), split="train")
+    train_dataset = load_dataset("json", data_files=str(Path(args.data)), split="train")
+    eval_dataset = None
+    if args.eval_data:
+        eval_dataset = load_dataset("json", data_files=str(Path(args.eval_data)), split="train")
 
     def format_sample(sample):
         input_text = json.dumps(sample["input"], ensure_ascii=False, indent=2)
@@ -52,12 +58,33 @@ def main() -> None:
             f"Input:\n{input_text}\n"
             "Output:"
         )
-        text = prompt + output_text + tokenizer.eos_token
-        tokenized = tokenizer(text, truncation=True, max_length=args.max_length, padding=False)
-        tokenized["labels"] = tokenized["input_ids"].copy()
-        return tokenized
+        target = output_text + tokenizer.eos_token
+        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        target_ids = tokenizer(target, add_special_tokens=False)["input_ids"]
+        if len(target_ids) >= args.max_length:
+            input_ids = target_ids[: args.max_length]
+            labels = input_ids.copy()
+        else:
+            prompt_budget = args.max_length - len(target_ids)
+            prompt_ids = prompt_ids[-prompt_budget:]
+            input_ids = prompt_ids + target_ids
+            labels = [-100] * len(prompt_ids) + target_ids
+        return {"input_ids": input_ids, "attention_mask": [1] * len(input_ids), "labels": labels}
 
-    tokenized = dataset.map(format_sample, remove_columns=dataset.column_names)
+    def collate(features):
+        max_len = max(len(item["input_ids"]) for item in features)
+        batch = {"input_ids": [], "attention_mask": [], "labels": []}
+        for item in features:
+            pad = max_len - len(item["input_ids"])
+            batch["input_ids"].append(item["input_ids"] + [tokenizer.pad_token_id] * pad)
+            batch["attention_mask"].append(item["attention_mask"] + [0] * pad)
+            batch["labels"].append(item["labels"] + [-100] * pad)
+        return {key: torch.tensor(value, dtype=torch.long) for key, value in batch.items()}
+
+    tokenized_train = train_dataset.map(format_sample, remove_columns=train_dataset.column_names)
+    tokenized_eval = None
+    if eval_dataset is not None:
+        tokenized_eval = eval_dataset.map(format_sample, remove_columns=eval_dataset.column_names)
     model = AutoModelForCausalLM.from_pretrained(args.model, trust_remote_code=True, torch_dtype="auto")
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -72,25 +99,38 @@ def main() -> None:
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
-    training_args = TrainingArguments(
-        output_dir=args.output,
-        num_train_epochs=args.epochs,
-        learning_rate=args.lr,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        save_strategy="steps",
-        warmup_ratio=args.warmup_ratio,
-        weight_decay=args.weight_decay,
-        bf16=args.bf16,
-        fp16=args.fp16,
-        gradient_checkpointing=args.gradient_checkpointing,
-        remove_unused_columns=False,
-        report_to=[],
+    training_kwargs = {
+        "output_dir": args.output,
+        "num_train_epochs": args.epochs,
+        "learning_rate": args.lr,
+        "per_device_train_batch_size": args.per_device_train_batch_size,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "logging_steps": args.logging_steps,
+        "save_steps": args.save_steps,
+        "save_strategy": "steps",
+        "warmup_ratio": args.warmup_ratio,
+        "weight_decay": args.weight_decay,
+        "bf16": args.bf16,
+        "fp16": args.fp16,
+        "gradient_checkpointing": args.gradient_checkpointing,
+        "remove_unused_columns": False,
+        "report_to": [],
+    }
+    if tokenized_eval is not None:
+        signature = inspect.signature(TrainingArguments.__init__).parameters
+        if "eval_strategy" in signature:
+            training_kwargs["eval_strategy"] = "steps"
+        else:
+            training_kwargs["evaluation_strategy"] = "steps"
+        training_kwargs["eval_steps"] = args.logging_steps
+    training_args = TrainingArguments(**training_kwargs)
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_train,
+        eval_dataset=tokenized_eval,
+        data_collator=collate,
     )
-    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-    trainer = Trainer(model=model, args=training_args, train_dataset=tokenized, data_collator=collator)
     trainer.train()
     trainer.save_model(args.output)
     tokenizer.save_pretrained(args.output)
