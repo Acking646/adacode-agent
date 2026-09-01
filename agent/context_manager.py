@@ -246,6 +246,12 @@ Return exactly one JSON object per response:
   "args": {}
 }
 
+Tool argument examples:
+- read_file: {"path": "relative/file.py"}
+- edit_file: {"path": "relative/file.py", "old": "exact old text", "new": "replacement"}
+- edit_file may also use {"path": "relative/file.py", "edits": [{"old": "...", "new": "..."}]}
+- run_tests: {"command": ["python", "-m", "pytest", "-q"]}
+
 Use local tools through JSON actions. Do not claim a file was changed until an
 edit_file or write_file action has been executed. Prefer running tests after a
 code change. After list_files, read the files most relevant to the task instead

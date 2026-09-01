@@ -75,7 +75,7 @@ class ToolExecutor:
         return ToolResult(True, "\n".join(files) or "(no files)")
 
     def read_file(self, args: dict) -> ToolResult:
-        path = self._safe_path(args.get("path", ""))
+        path = self._safe_path(args.get("path") or args.get("file") or "")
         start_line = int(args.get("start_line", 1))
         max_lines = int(args.get("max_lines", 240))
         if not path.is_file():
@@ -110,21 +110,35 @@ class ToolExecutor:
         return ToolResult(True, self._trim(diff or "File written without content changes."))
 
     def edit_file(self, args: dict) -> ToolResult:
-        path = self._safe_path(args.get("path", ""))
-        old = args.get("old")
-        new = args.get("new")
-        replace_all = bool(args.get("replace_all", False))
-        if not isinstance(old, str) or not isinstance(new, str):
-            raise ToolError("edit_file requires string old and new fields.")
+        path = self._safe_path(args.get("path") or args.get("file") or "")
         if not path.is_file():
             raise ToolError(f"Not a file: {path.relative_to(self.workspace)}")
         content = path.read_text(encoding="utf-8", errors="replace")
-        count = content.count(old)
-        if count == 0:
-            raise ToolError("Old text not found.")
-        if count > 1 and not replace_all:
-            raise ToolError(f"Old text appears {count} times; set replace_all=true or use a more specific snippet.")
-        updated = content.replace(old, new) if replace_all else content.replace(old, new, 1)
+
+        edits = args.get("edits")
+        if edits is None:
+            edits = [{"old": args.get("old"), "new": args.get("new"), "replace_all": args.get("replace_all", False)}]
+        if not isinstance(edits, list) or not edits:
+            raise ToolError("edit_file requires old/new strings or a non-empty edits list.")
+
+        updated = content
+        replacements = 0
+        for edit in edits:
+            if not isinstance(edit, dict):
+                raise ToolError("Each edit must be an object with old and new fields.")
+            old = edit.get("old")
+            new = edit.get("new")
+            replace_all = bool(edit.get("replace_all", args.get("replace_all", False)))
+            if not isinstance(old, str) or not isinstance(new, str):
+                raise ToolError("edit_file requires string old and new fields.")
+            count = updated.count(old)
+            if count == 0:
+                raise ToolError("Old text not found.")
+            if count > 1 and not replace_all:
+                raise ToolError(f"Old text appears {count} times; set replace_all=true or use a more specific snippet.")
+            updated = updated.replace(old, new) if replace_all else updated.replace(old, new, 1)
+            replacements += count if replace_all else 1
+
         path.write_text(updated, encoding="utf-8")
         diff = "\n".join(
             difflib.unified_diff(
@@ -135,7 +149,7 @@ class ToolExecutor:
                 lineterm="",
             )
         )
-        return ToolResult(True, self._trim(diff), {"replacements": count if replace_all else 1})
+        return ToolResult(True, self._trim(diff), {"replacements": replacements})
 
     def run_command(self, args: dict) -> ToolResult:
         command = args.get("command")
