@@ -113,7 +113,8 @@ async function runAgent() {
     const submittedTask = $("task").value.trim();
     if (!submittedTask) throw new Error("请输入需要执行的编程任务。");
     currentTask = submittedTask;
-    const budget = Number($("tokenBudget").value);
+    const budget = Math.max(800, Number($("tokenBudget").value) || 1600);
+    $("tokenBudget").value = String(budget);
     setStatus("任务已提交", "running");
     lastRenderKey = "";
     renderThread([], currentTask);
@@ -127,6 +128,9 @@ async function runAgent() {
       cm_base_url: $("cmBaseUrl").value,
       cm_model: $("cmModel").value,
       cm_api_key: "EMPTY",
+      cm_timeout: 25,
+      cm_retries: 1,
+      cm_max_tokens: 768,
       max_steps: Number($("maxSteps").value),
       token_budget: budget,
       llm_timeout: 90,
@@ -135,7 +139,6 @@ async function runAgent() {
     const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload), timeoutMs: 10000 });
     currentJob = started.job_id;
     $("jobId").textContent = currentJob;
-    $("task").value = "";
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(fetchJob, 3000);
     fetchJob();
@@ -160,9 +163,12 @@ async function previewContext(mode) {
       cm_base_url: $("cmBaseUrl").value,
       cm_model: $("cmModel").value,
       cm_api_key: "EMPTY",
+      cm_timeout: 25,
+      cm_retries: 1,
+      cm_max_tokens: 768,
       token_budget: Number($("previewBudget").value),
     };
-    const timeoutMs = mode === "qwen" ? 45000 : 8000;
+    const timeoutMs = mode === "qwen" ? 32000 : 8000;
     const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload), timeoutMs });
     renderContextPreview(result, previewTask);
     setStatus(`${result.manager}：保留 ${result.selected_tokens}/${result.full_tokens} tokens`, "idle");

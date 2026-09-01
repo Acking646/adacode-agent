@@ -193,9 +193,9 @@ def preview_context(payload: Dict[str, Any]) -> Dict[str, Any]:
             base_url=str(payload.get("cm_base_url") or "http://127.0.0.1:8001/v1"),
             temperature=0.0,
             top_p=1.0,
-            max_tokens=1024,
-            timeout=300,
-            retries=2,
+            max_tokens=int(payload.get("cm_max_tokens") or 768),
+            timeout=int(payload.get("cm_timeout") or 25),
+            retries=int(payload.get("cm_retries") or 1),
         )
         selector = TrainedJSONSelectionModel(cm_llm)
         manager_name = "Qwen SFT 上下文管理器"
@@ -281,9 +281,9 @@ def worker(job_id: str, payload: Dict[str, Any]) -> None:
                 model=str(payload.get("cm_model") or "cm"),
                 api_key=str(payload.get("cm_api_key") or "EMPTY"),
                 base_url=str(payload.get("cm_base_url") or "http://127.0.0.1:8001/v1"),
-                timeout=300,
-                retries=2,
-                max_tokens=1024,
+                timeout=int(payload.get("cm_timeout") or 25),
+                retries=int(payload.get("cm_retries") or 1),
+                max_tokens=int(payload.get("cm_max_tokens") or 768),
             )
             context_manager = ContextManager(
                 memory,

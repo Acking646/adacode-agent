@@ -80,6 +80,13 @@ class TrainedJSONSelectionModel:
         self.llm_client = llm_client
 
     def select(self, task: str, candidates: List[ContextCandidate], token_budget: int) -> ContextSelection:
+        operational_kinds = {"assistant", "tool", "observation", "error", "memory"}
+        if not any(candidate.kind in operational_kinds for candidate in candidates):
+            return ContextSelection(
+                keep=["task_goal"],
+                drop=[candidate.id for candidate in candidates if candidate.id != "task_goal"],
+                reason="No tool history yet; skipped Qwen compression for the first step.",
+            )
         prompt = {
             "instruction": "Select useful context for the next coding-agent step under the token budget.",
             "task": task,
@@ -158,6 +165,7 @@ class ContextManager:
             selection = fallback.select(task, candidates, self.token_budget)
             selection.reason = f"上下文管理器失败（{type(exc).__name__}: {exc}），已回退到规则评分。"
         by_id = {candidate.id: candidate for candidate in candidates}
+        selection = self._pin_operational_context(selection, candidates, by_id)
         selected = [by_id[item] for item in selection.keep if item in by_id]
         full_tokens = sum(estimate_tokens(candidate.content) for candidate in candidates)
         selected_tokens = sum(estimate_tokens(candidate.content) for candidate in selected)
@@ -191,6 +199,42 @@ class ContextManager:
             Message("managed_context", "user", "\n".join(content), "managed_context"),
         ]
         return messages, selection
+
+    def _pin_operational_context(
+        self,
+        selection: ContextSelection,
+        candidates: List[ContextCandidate],
+        by_id: dict,
+    ) -> ContextSelection:
+        pinned = {"task_goal"}
+        for candidate in reversed(candidates):
+            if candidate.kind in {"assistant", "tool", "observation", "error"}:
+                pinned.add(candidate.id)
+            if len(pinned) >= 5:
+                break
+
+        keep: List[str] = []
+        seen = set()
+        for candidate in candidates:
+            if candidate.id in pinned:
+                keep.append(candidate.id)
+                seen.add(candidate.id)
+
+        used = sum(estimate_tokens(by_id[item].content) for item in keep if item in by_id)
+        for item in selection.keep:
+            if item in seen or item not in by_id:
+                continue
+            cost = estimate_tokens(by_id[item].content)
+            if used + cost <= self.token_budget:
+                keep.append(item)
+                seen.add(item)
+                used += cost
+
+        drop = [candidate.id for candidate in candidates if candidate.id not in seen]
+        reason = selection.reason or "Context selected."
+        if any(item not in set(selection.keep) for item in pinned):
+            reason = f"{reason} Recent tool observations were pinned to avoid repeated actions."
+        return ContextSelection(keep=keep, drop=drop, update_memory=selection.update_memory, reason=reason)
 
 
 CODING_SYSTEM_PROMPT = """You are a coding agent.
