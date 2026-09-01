@@ -10,9 +10,7 @@ NPROC="${NPROC:-2}"
 
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-$GPUS}"
 
-ARGS=(
-  --nproc_per_node="$NPROC"
-  -m training.train_manager
+TRAIN_ARGS=(
   --model_name_or_path "$MODEL_PATH"
   --data_path "$DATA_PATH"
   --output_dir "$OUTPUT_DIR"
@@ -31,7 +29,11 @@ ARGS=(
 )
 
 if [[ -n "$EVAL_DATA_PATH" ]]; then
-  ARGS+=(--eval_data_path "$EVAL_DATA_PATH")
+  TRAIN_ARGS+=(--eval_data_path "$EVAL_DATA_PATH")
 fi
 
-torchrun "${ARGS[@]}"
+if [[ "$NPROC" == "1" ]]; then
+  python -m training.train_manager "${TRAIN_ARGS[@]}"
+else
+  torchrun --nproc_per_node="$NPROC" -m training.train_manager "${TRAIN_ARGS[@]}"
+fi
