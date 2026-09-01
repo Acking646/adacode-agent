@@ -269,8 +269,8 @@ def worker(job_id: str, payload: Dict[str, Any]) -> None:
         llm = OpenAICompatibleClient(
             model=model,
             base_url=base_url,
-            timeout=int(payload.get("llm_timeout") or 300),
-            retries=int(payload.get("llm_retries") or 5),
+            timeout=int(payload.get("llm_timeout") or 90),
+            retries=int(payload.get("llm_retries") or 1),
             max_tokens=int(payload.get("max_tokens") or 2048),
         )
 
@@ -442,6 +442,7 @@ class Handler(BaseHTTPRequestHandler):
         data = path.read_bytes()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

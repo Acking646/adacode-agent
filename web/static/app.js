@@ -38,54 +38,72 @@ async function api(path, options = {}) {
 
 function setStatus(text, state = "idle") {
   $("status").innerHTML = `<span class="status-dot ${state}"></span>${escapeHtml(text)}`;
-  $("loopState").textContent = state;
+  const loopState = $("loopState");
+  if (loopState) loopState.textContent = state;
+}
+
+function reportUiError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  setStatus(`UI error: ${message}`, "failed");
+  console.error(error);
+}
+
+function bindAsync(id, handler) {
+  $(id).addEventListener("click", () => {
+    Promise.resolve(handler()).catch(reportUiError);
+  });
 }
 
 async function resetDemo() {
-  const payload = await api("/api/demo/reset", { method: "POST", body: "{}", timeoutMs: 10000 });
-  currentWorkspace = payload.workspace;
-  $("workspace").value = payload.workspace;
-  $("task").value = payload.task;
-  lastFilesKey = "";
-  renderFiles(payload.files || []);
-  $("steps").textContent = "0";
-  $("keepCount").textContent = "0";
-  $("dropCount").textContent = "0";
-  $("patchChars").textContent = "0 chars";
-  $("jobId").textContent = "no job";
-  artifacts.patch = "";
-  artifacts.tests = "";
-  artifacts.context = "";
-  updateArtifactBadges();
-  closeArtifact();
-  lastRenderKey = "";
-  renderThread([]);
-  setStatus("Demo reset", "idle");
+  $("resetDemo").disabled = true;
+  try {
+    const payload = await api("/api/demo/reset", { method: "POST", body: "{}", timeoutMs: 10000 });
+    currentWorkspace = payload.workspace;
+    $("workspace").value = payload.workspace;
+    $("task").value = payload.task;
+    lastFilesKey = "";
+    renderFiles(payload.files || []);
+    $("steps").textContent = "0";
+    $("keepCount").textContent = "0";
+    $("dropCount").textContent = "0";
+    $("patchChars").textContent = "0 chars";
+    $("jobId").textContent = "no job";
+    artifacts.patch = "";
+    artifacts.tests = "";
+    artifacts.context = "";
+    updateArtifactBadges();
+    closeArtifact();
+    lastRenderKey = "";
+    renderThread([]);
+    setStatus("Demo reset", "idle");
+  } finally {
+    $("resetDemo").disabled = false;
+  }
 }
 
 async function runAgent() {
   $("runAgent").disabled = true;
   setPreviewDisabled(true);
-  const budget = Number($("tokenBudget").value);
-  setStatus(budget < 800 ? "Queued with tight context" : "Queued", "running");
-  lastRenderKey = "";
-  renderThread([], $("task").value);
-  const payload = {
-    workspace: $("workspace").value,
-    task: $("task").value,
-    test_command: commandToList($("testCommand").value),
-    model: $("model").value,
-    base_url: $("baseUrl").value || null,
-    cm_mode: cmMode,
-    cm_base_url: $("cmBaseUrl").value,
-    cm_model: $("cmModel").value,
-    cm_api_key: "EMPTY",
-    max_steps: Number($("maxSteps").value),
-    token_budget: budget,
-    llm_timeout: 300,
-    llm_retries: 5,
-  };
   try {
+    const budget = Number($("tokenBudget").value);
+    setStatus(budget < 800 ? "Queued with tight context" : "Queued", "running");
+    lastRenderKey = "";
+    renderThread([], $("task").value);
+    const payload = {
+      workspace: $("workspace").value,
+      task: $("task").value,
+      test_command: commandToList($("testCommand").value),
+      model: $("model").value,
+      base_url: $("baseUrl").value || null,
+      cm_mode: cmMode,
+      cm_base_url: $("cmBaseUrl").value,
+      cm_model: $("cmModel").value,
+      cm_api_key: "EMPTY",
+      max_steps: Number($("maxSteps").value),
+      token_budget: budget,
+      llm_timeout: 90,
+      llm_retries: 1,
+    };
     const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload), timeoutMs: 10000 });
     currentJob = started.job_id;
     $("jobId").textContent = currentJob;
@@ -102,17 +120,17 @@ async function runAgent() {
 async function previewContext(mode) {
   setPreviewDisabled(true);
   const name = mode === "qwen" ? "Qwen SFT" : "Rule";
-  setStatus(`${name} context preview`, "running");
-  const payload = {
-    workspace: $("workspace").value,
-    task: $("task").value,
-    cm_mode: mode,
-    cm_base_url: $("cmBaseUrl").value,
-    cm_model: $("cmModel").value,
-    cm_api_key: "EMPTY",
-    token_budget: Number($("tokenBudget").value),
-  };
   try {
+    setStatus(`${name} context preview`, "running");
+    const payload = {
+      workspace: $("workspace").value,
+      task: $("task").value,
+      cm_mode: mode,
+      cm_base_url: $("cmBaseUrl").value,
+      cm_model: $("cmModel").value,
+      cm_api_key: "EMPTY",
+      token_budget: Number($("tokenBudget").value),
+    };
     const timeoutMs = mode === "qwen" ? 45000 : 8000;
     const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload), timeoutMs });
     renderContextPreview(result);
@@ -255,7 +273,7 @@ function threadHeading(job = null) {
       <span>Timeline</span>
       <strong>agent loop</strong>
     </div>
-    <code>${escapeHtml(elapsed)}</code>
+    <code id="loopState">${escapeHtml(elapsed)}</code>
   `;
   return wrap;
 }
@@ -461,9 +479,12 @@ document.querySelectorAll(".artifact-chip").forEach((button) => {
 });
 
 $("closeArtifact").addEventListener("click", closeArtifact);
-$("resetDemo").addEventListener("click", resetDemo);
-$("runAgent").addEventListener("click", runAgent);
-$("previewRule").addEventListener("click", () => previewContext("rule"));
-$("previewQwen").addEventListener("click", () => previewContext("qwen"));
+bindAsync("resetDemo", resetDemo);
+bindAsync("runAgent", runAgent);
+bindAsync("previewRule", () => previewContext("rule"));
+bindAsync("previewQwen", () => previewContext("qwen"));
 
-resetDemo();
+window.addEventListener("error", (event) => reportUiError(event.error || event.message));
+window.addEventListener("unhandledrejection", (event) => reportUiError(event.reason));
+
+resetDemo().catch(reportUiError);
