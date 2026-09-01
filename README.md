@@ -49,6 +49,16 @@ Run a deterministic no-API demo:
 python -m agent.demo
 ```
 
+Run the local web console for demos:
+
+```bash
+python -m web.server --host 127.0.0.1 --port 7860
+```
+
+Open `http://127.0.0.1:7860`, reset the built-in demo workspace, and run the
+agent. The console visualizes tool calls, context keep/drop decisions, tests,
+and the final patch.
+
 Run the agent on a workspace with an OpenAI-compatible model:
 
 ```bash
