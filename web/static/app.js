@@ -25,18 +25,22 @@ async function resetDemo() {
   $("workspace").value = payload.workspace;
   $("task").value = payload.task;
   renderFiles(payload.files || []);
-  $("status").textContent = "示例已重置";
+  $("status").textContent = "Demo reset";
+  $("steps").textContent = "0";
+  $("keepCount").textContent = "0";
+  $("dropCount").textContent = "0";
+  $("patchChars").textContent = "0 chars";
   $("patch").textContent = "";
   $("tests").textContent = "";
   $("context").textContent = "";
-  $("timeline").className = "timeline-list empty";
-  $("timeline").textContent = "等待运行";
-  drawActivity([]);
+  $("jobId").textContent = "no job";
+  renderThread([]);
 }
 
 async function runAgent() {
   $("runAgent").disabled = true;
-  $("status").textContent = "排队中";
+  $("status").textContent = "Queued";
+  renderThread([], $("task").value);
   const payload = {
     workspace: $("workspace").value,
     task: $("task").value,
@@ -56,7 +60,7 @@ async function runAgent() {
   currentJob = started.job_id;
   $("jobId").textContent = currentJob;
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchJob, 1500);
+  pollTimer = setInterval(fetchJob, 1200);
   fetchJob();
 }
 
@@ -88,9 +92,8 @@ function renderJob(job) {
   const after = job.after ? formatTest("After", job.after) : "";
   $("tests").textContent = [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n");
   $("context").textContent = renderContext(trace.actions || []);
-  renderTimeline(trace.actions || []);
+  renderThread(trace.actions || [], $("task").value, job);
   renderFiles(job.files || []);
-  drawActivity(trace.actions || []);
 }
 
 function formatTest(title, payload) {
@@ -98,31 +101,69 @@ function formatTest(title, payload) {
   return `${title}: ${status} (returncode=${payload.returncode})\n${payload.output || ""}`;
 }
 
-function renderTimeline(actions) {
-  const box = $("timeline");
+function renderThread(actions, task = "", job = null) {
+  const thread = $("thread");
+  thread.innerHTML = "";
+  thread.appendChild(message("assistant", "Ready", "I will inspect files, run local commands, edit code, and keep the prompt compact through the context manager."));
+  if (task.trim()) {
+    thread.appendChild(message("user", "Task", task.trim()));
+  }
   if (!actions.length) {
-    box.className = "timeline-list empty";
-    box.textContent = "等待工具调用";
+    if (job?.status === "running") {
+      thread.appendChild(message("assistant", "Working", "Preparing the next local tool call..."));
+    }
+    thread.scrollTop = thread.scrollHeight;
     return;
   }
-  box.className = "timeline-list";
-  box.innerHTML = "";
+
   for (const action of actions) {
-    const item = document.createElement("div");
-    item.className = `step ${action.ok ? "" : "bad"}`;
+    const ok = action.ok ? "ok" : "failed";
     const args = JSON.stringify(action.args || {}, null, 2);
-    item.innerHTML = `
-      <div class="step-index">${action.step}</div>
-      <div>
-        <div class="step-title">
-          <span>${escapeHtml(action.name || "unknown")}</span>
-          <code>${action.ok ? "ok" : "failed"}</code>
-        </div>
-        <div class="step-output">${escapeHtml(args)}\n\n${escapeHtml(action.output || "")}</div>
+    const body = `
+      <div class="tool-args">${escapeHtml(args)}</div>
+      <div class="tool-output">${escapeHtml(action.output || "")}</div>
+      <div class="tool-meta">
+        <span class="pill ${action.ok ? "ok" : "bad"}">${ok}</span>
+        <span class="pill">keep ${(action.keep || []).length}</span>
+        <span class="pill">drop ${(action.drop || []).length}</span>
       </div>
     `;
-    box.appendChild(item);
+    thread.appendChild(message("assistant", `Step ${action.step}: ${action.name}`, body, true));
   }
+
+  if (job?.status === "done") {
+    const result = job.after?.ok ? "Tests passed after the patch." : "Run finished; inspect the patch and test output.";
+    thread.appendChild(message("assistant", "Result", result));
+  } else if (job?.status === "failed") {
+    thread.appendChild(message("assistant", "Stopped", job.message || "The run stopped with an error."));
+  }
+  thread.scrollTop = thread.scrollHeight;
+}
+
+function message(role, title, body, html = false) {
+  const article = document.createElement("article");
+  article.className = `message ${role}`;
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = role === "user" ? "ME" : "AC";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  const titleEl = document.createElement("div");
+  titleEl.className = "message-title";
+  titleEl.innerHTML = `<span>${escapeHtml(title)}</span><code>${role}</code>`;
+  const content = document.createElement("div");
+  if (html) {
+    content.innerHTML = body;
+  } else {
+    const paragraph = document.createElement("p");
+    paragraph.textContent = body;
+    content.appendChild(paragraph);
+  }
+  bubble.appendChild(titleEl);
+  bubble.appendChild(content);
+  article.appendChild(avatar);
+  article.appendChild(bubble);
+  return article;
 }
 
 function renderContext(actions) {
@@ -142,7 +183,14 @@ function renderContext(actions) {
 function renderFiles(files) {
   const list = $("fileList");
   list.innerHTML = "";
-  for (const file of files.slice(0, 48)) {
+  if (!files.length) {
+    const empty = document.createElement("span");
+    empty.className = "muted-line";
+    empty.textContent = "No files loaded";
+    list.appendChild(empty);
+    return;
+  }
+  for (const file of files.slice(0, 80)) {
     const button = document.createElement("button");
     button.textContent = file;
     button.title = file;
@@ -156,35 +204,6 @@ async function openFile(path) {
   const payload = await api(`/api/file?workspace=${encodeURIComponent(workspace)}&path=${encodeURIComponent(path)}`);
   $("patch").textContent = payload.content;
   activateTab("patch");
-}
-
-function drawActivity(actions) {
-  const canvas = $("activityCanvas");
-  const context = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
-  context.clearRect(0, 0, w, h);
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, w, h);
-  context.strokeStyle = "#d7dee8";
-  context.beginPath();
-  context.moveTo(0, h - 28);
-  context.lineTo(w, h - 28);
-  context.stroke();
-
-  const count = Math.max(actions.length, 1);
-  const barWidth = Math.max(12, Math.floor((w - 48) / count) - 8);
-  actions.forEach((action, index) => {
-    const keep = action.keep?.length || 0;
-    const drop = action.drop?.length || 0;
-    const height = Math.min(64, 18 + keep * 5 + drop * 2);
-    const x = 24 + index * (barWidth + 8);
-    const y = h - 28 - height;
-    context.fillStyle = action.ok ? "#1f7a8c" : "#b24b4b";
-    context.fillRect(x, y, barWidth, height);
-    context.fillStyle = "#637083";
-    context.fillText(String(index + 1), x + 2, h - 10);
-  });
 }
 
 function activateTab(name) {
@@ -207,6 +226,7 @@ function escapeHtml(text) {
 document.querySelectorAll(".segmented button").forEach((button) => {
   button.addEventListener("click", () => {
     cmMode = button.dataset.mode;
+    $("cmModeLabel").textContent = cmMode === "qwen" ? "Qwen SFT CM" : "Rule CM";
     document.querySelectorAll(".segmented button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
   });

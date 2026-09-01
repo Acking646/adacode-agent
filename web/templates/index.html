@@ -3,124 +3,122 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AdaCode Agent Console</title>
+    <title>AdaCode Workbench</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <div class="app">
-      <aside class="sidebar">
+    <div class="workbench">
+      <aside class="left-rail">
         <div class="brand">
           <div class="mark">AC</div>
           <div>
-            <h1>AdaCode Console</h1>
-            <p>本地编程智能体运行台</p>
+            <h1>AdaCode</h1>
+            <p>coding agent workbench</p>
           </div>
         </div>
 
-        <section class="panel">
-          <div class="panel-title">任务</div>
+        <button id="resetDemo" class="wide ghost" title="Reset the built-in demo workspace">
+          <span aria-hidden="true">↺</span>
+          Reset demo
+        </button>
+
+        <section class="rail-section">
+          <div class="section-title">Workspace</div>
+          <input id="workspace" value="outputs/web_demo_workspace" />
+          <div id="fileList" class="file-tree"></div>
+        </section>
+
+        <section class="rail-section">
+          <div class="section-title">Runtime</div>
           <label>
-            工作目录
-            <input id="workspace" value="outputs/web_demo_workspace" />
-          </label>
-          <label>
-            测试命令
+            Test command
             <input id="testCommand" value="python -m pytest -q" />
           </label>
           <label>
-            任务描述
-            <textarea id="task" rows="8"></textarea>
-          </label>
-          <div class="button-row">
-            <button id="resetDemo" title="重置内置示例工程"><span>↺</span>重置示例</button>
-            <button id="runAgent" class="primary" title="启动一次 agent 运行"><span>▶</span>运行</button>
-          </div>
-        </section>
-
-        <section class="panel compact">
-          <div class="panel-title">模型</div>
-          <label>
-            主模型
+            Main model
             <input id="model" value="deepseek-ai/DeepSeek-V4-Flash" />
           </label>
           <label>
-            API Base URL
-            <input id="baseUrl" value="" placeholder="从 OPENAI_BASE_URL 读取" />
+            API base URL
+            <input id="baseUrl" value="" placeholder="from OPENAI_BASE_URL" />
           </label>
+        </section>
+
+        <section class="rail-section">
+          <div class="section-title">Context manager</div>
           <div class="segmented" role="tablist" aria-label="context manager mode">
-            <button id="cmRule" class="active" data-mode="rule">Rule CM</button>
-            <button id="cmQwen" data-mode="qwen">Qwen CM</button>
+            <button id="cmRule" class="active" data-mode="rule">Rule</button>
+            <button id="cmQwen" data-mode="qwen">Qwen SFT</button>
           </div>
           <label>
-            Qwen CM URL
+            Qwen endpoint
             <input id="cmBaseUrl" value="http://127.0.0.1:8001/v1" />
           </label>
           <label>
-            Qwen 模型名
+            Qwen model
             <input id="cmModel" value="cm" />
           </label>
-          <div class="grid-2">
+          <div class="inline-fields">
             <label>
-              步数
+              Steps
               <input id="maxSteps" type="number" min="1" max="30" value="8" />
             </label>
             <label>
-              上下文预算
+              Budget
               <input id="tokenBudget" type="number" min="200" step="100" value="1200" />
             </label>
           </div>
         </section>
       </aside>
 
-      <main class="main">
-        <section class="status-band">
+      <main class="center-pane">
+        <header class="topbar">
           <div>
-            <span class="eyebrow">Status</span>
-            <strong id="status">未运行</strong>
+            <div class="overline">Local agent session</div>
+            <strong id="status">Idle</strong>
           </div>
-          <div>
-            <span class="eyebrow">Steps</span>
-            <strong id="steps">0</strong>
+          <div class="metrics">
+            <div><span>steps</span><strong id="steps">0</strong></div>
+            <div><span>keep/drop</span><strong><b id="keepCount">0</b>/<b id="dropCount">0</b></strong></div>
+            <div><span>patch</span><strong id="patchChars">0 chars</strong></div>
           </div>
-          <div>
-            <span class="eyebrow">Context Keep / Drop</span>
-            <strong><span id="keepCount">0</span> / <span id="dropCount">0</span></strong>
-          </div>
-          <div>
-            <span class="eyebrow">Patch</span>
-            <strong id="patchChars">0 chars</strong>
-          </div>
-        </section>
+        </header>
 
-        <section class="workspace-strip">
-          <div>
-            <span class="eyebrow">Files</span>
-            <div id="fileList" class="file-list"></div>
-          </div>
-          <canvas id="activityCanvas" width="520" height="96" aria-label="activity graph"></canvas>
-        </section>
-
-        <section class="columns">
-          <div class="timeline">
-            <div class="section-head">
-              <h2>工具轨迹</h2>
-              <span id="jobId"></span>
+        <section id="thread" class="thread">
+          <article class="message assistant">
+            <div class="avatar">AC</div>
+            <div class="bubble">
+              <div class="message-title">Ready</div>
+              <p>Reset the sample workspace, then run the agent. Each step below will show the local tool call, observation, and context selection.</p>
             </div>
-            <div id="timeline" class="timeline-list empty">等待运行</div>
-          </div>
-
-          <div class="inspectors">
-            <div class="tabs">
-              <button class="active" data-tab="patch">Patch</button>
-              <button data-tab="tests">Tests</button>
-              <button data-tab="context">Context</button>
-            </div>
-            <pre id="patch" class="tab-body"></pre>
-            <pre id="tests" class="tab-body hidden"></pre>
-            <pre id="context" class="tab-body hidden"></pre>
-          </div>
+          </article>
         </section>
+
+        <footer class="composer">
+          <textarea id="task" rows="3" placeholder="Describe a coding task for the agent..."></textarea>
+          <div class="composer-actions">
+            <div class="run-meta">
+              <span id="jobId">no job</span>
+              <span id="cmModeLabel">Rule CM</span>
+            </div>
+            <button id="runAgent" class="primary" title="Run the coding agent">
+              <span aria-hidden="true">▶</span>
+              Run
+            </button>
+          </div>
+        </footer>
       </main>
+
+      <aside class="right-pane">
+        <div class="tabs">
+          <button class="active" data-tab="patch">Patch</button>
+          <button data-tab="tests">Tests</button>
+          <button data-tab="context">Context</button>
+        </div>
+        <pre id="patch" class="tab-body"></pre>
+        <pre id="tests" class="tab-body hidden"></pre>
+        <pre id="context" class="tab-body hidden"></pre>
+      </aside>
     </div>
 
     <script src="/static/app.js"></script>

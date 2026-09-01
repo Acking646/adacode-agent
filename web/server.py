@@ -265,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_file(INDEX, "text/html; charset=utf-8")
             return
         if parsed.path.startswith("/static/"):
-            name = parsed.path.removeprefix("/static/")
+            name = parsed.path[len("/static/") :]
             path = (STATIC / name).resolve()
             if STATIC.resolve() not in path.parents:
                 self.send_json({"error": "invalid static path"}, HTTPStatus.BAD_REQUEST)
@@ -289,6 +289,12 @@ class Handler(BaseHTTPRequestHandler):
                 trace_path = Path(str(job.get("trace_path")))
                 job = dict(job)
                 job["trace"] = summarize_trace(parse_trace(trace_path))
+                workspace = job.get("workspace")
+                if workspace:
+                    workspace_path = Path(str(workspace))
+                    job["patch"] = git_diff(workspace_path)
+                    job["patch_chars"] = len(str(job["patch"]))
+                    job["files"] = list_files(workspace_path)
             self.send_json(job)
             return
         if parsed.path == "/api/file":
@@ -322,6 +328,7 @@ class Handler(BaseHTTPRequestHandler):
                         "status": "queued",
                         "message": "Queued",
                         "trace_path": str(trace_path),
+                        "workspace": str(resolve_workspace(str(payload.get("workspace") or DEMO_WORKSPACE))),
                         "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     }
                 thread = threading.Thread(target=worker, args=(job_id, payload), daemon=True)
