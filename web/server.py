@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "web" / "static"
 INDEX = ROOT / "web" / "templates" / "index.html"
 OUTPUTS = ROOT / "outputs"
-DEMO_SOURCE = ROOT / "examples" / "demo_project"
+DEMO_SOURCE = ROOT / "examples" / "context_demo_project"
 DEMO_WORKSPACE = OUTPUTS / "web_demo_workspace"
 
 JOBS: Dict[str, Dict[str, Any]] = {}

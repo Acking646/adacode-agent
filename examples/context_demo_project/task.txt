@@ -1,0 +1,4 @@
+Fix the event metrics implementation so the tests pass.
+
+The report should normalize event names, ignore malformed rows, count only valid
+events, and compute error_rate as failed_events / valid_events.
