@@ -75,6 +75,7 @@ class CodingAgent:
                     "event": "step",
                     "step": self.step_index,
                     "selection": asdict(selection),
+                    "context": self.context_manager.last_stats,
                     "action": asdict(action),
                     "result": {"ok": result.ok, "metadata": result.metadata, "output": result.output[:4000]},
                 }

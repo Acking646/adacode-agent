@@ -22,33 +22,36 @@ async function api(path, options = {}) {
   return payload;
 }
 
+function setStatus(text, state = "idle") {
+  $("status").innerHTML = `<span class="status-dot ${state}"></span>${escapeHtml(text)}`;
+  $("loopState").textContent = state;
+}
+
 async function resetDemo() {
   const payload = await api("/api/demo/reset", { method: "POST", body: "{}" });
   currentWorkspace = payload.workspace;
   $("workspace").value = payload.workspace;
   $("task").value = payload.task;
   renderFiles(payload.files || []);
-  $("status").textContent = "Demo reset";
   $("steps").textContent = "0";
   $("keepCount").textContent = "0";
   $("dropCount").textContent = "0";
   $("patchChars").textContent = "0 chars";
-  $("patch").textContent = "";
-  $("tests").textContent = "";
-  $("context").textContent = "";
+  updateText("patch", "");
+  updateText("tests", "");
+  updateText("context", "");
   $("jobId").textContent = "no job";
   lastRenderKey = "";
   lastFilesKey = "";
-  textCache.patch = "";
-  textCache.tests = "";
-  textCache.context = "";
   renderThread([]);
+  setStatus("Demo reset", "idle");
 }
 
 async function runAgent() {
   $("runAgent").disabled = true;
   $("compressContext").disabled = true;
-  $("status").textContent = "Queued";
+  const budget = Number($("tokenBudget").value);
+  setStatus(budget < 800 ? "Queued with a tight context budget" : "Queued", "running");
   lastRenderKey = "";
   renderThread([], $("task").value);
   const payload = {
@@ -62,7 +65,7 @@ async function runAgent() {
     cm_model: $("cmModel").value,
     cm_api_key: "EMPTY",
     max_steps: Number($("maxSteps").value),
-    token_budget: Number($("tokenBudget").value),
+    token_budget: budget,
     llm_timeout: 300,
     llm_retries: 5,
   };
@@ -70,13 +73,13 @@ async function runAgent() {
   currentJob = started.job_id;
   $("jobId").textContent = currentJob;
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchJob, 2000);
+  pollTimer = setInterval(fetchJob, 3000);
   fetchJob();
 }
 
 async function compressContext() {
   $("compressContext").disabled = true;
-  $("status").textContent = "Compressing context";
+  setStatus("Compressing context", "running");
   const payload = {
     workspace: $("workspace").value,
     task: $("task").value,
@@ -90,9 +93,9 @@ async function compressContext() {
     const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload) });
     renderContextPreview(result);
     activateTab("context");
-    $("status").textContent = `${result.manager}: ${result.selected_tokens}/${result.full_tokens} tokens`;
+    setStatus(`${result.manager}: ${result.selected_tokens}/${result.full_tokens} tokens`, "idle");
   } catch (error) {
-    $("status").textContent = error.message;
+    setStatus(error.message, "failed");
   } finally {
     $("compressContext").disabled = false;
   }
@@ -109,7 +112,7 @@ async function fetchJob() {
       $("compressContext").disabled = false;
     }
   } catch (error) {
-    $("status").textContent = error.message;
+    setStatus(error.message, "failed");
     $("runAgent").disabled = false;
     $("compressContext").disabled = false;
   }
@@ -117,7 +120,8 @@ async function fetchJob() {
 
 function renderJob(job) {
   const trace = job.trace || { actions: [], steps: 0, selected: 0, dropped: 0 };
-  $("status").textContent = `${job.status}: ${job.message || ""}`;
+  const state = job.status === "failed" ? "failed" : job.status === "running" ? "running" : "idle";
+  setStatus(`${job.status}: ${job.message || ""}`, state);
   $("steps").textContent = trace.steps || 0;
   $("keepCount").textContent = trace.selected || 0;
   $("dropCount").textContent = trace.dropped || 0;
@@ -128,7 +132,8 @@ function renderJob(job) {
   const after = job.after ? formatTest("After", job.after) : "";
   updateText("tests", [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n"));
   updateText("context", renderContext(trace.actions || []));
-  const key = `${job.status}:${trace.steps}:${job.patch_chars || 0}`;
+
+  const key = `${job.status}:${trace.steps}:${job.patch_chars || 0}:${job.message || ""}`;
   if (key !== lastRenderKey) {
     renderThread(trace.actions || [], $("task").value, job);
     lastRenderKey = key;
@@ -150,31 +155,22 @@ function formatTest(title, payload) {
 function renderThread(actions, task = "", job = null) {
   const thread = $("thread");
   thread.innerHTML = "";
-  thread.appendChild(message("assistant", "Ready", "I will inspect files, run local commands, edit code, and keep the prompt compact through the context manager."));
+  thread.appendChild(threadHeading(job));
+  thread.appendChild(message("assistant", "Ready", "I will inspect local files, execute tools, edit code, run tests, and compress context before each model call."));
   if (task.trim()) {
     thread.appendChild(message("user", "Task", task.trim()));
   }
+
   if (!actions.length) {
     if (job?.status === "running") {
-      thread.appendChild(message("assistant", "Working", "Preparing the next local tool call..."));
+      thread.appendChild(message("assistant", "Working", "Preparing the first local tool call."));
     }
     thread.scrollTop = thread.scrollHeight;
     return;
   }
 
   for (const action of actions) {
-    const ok = action.ok ? "ok" : "failed";
-    const args = JSON.stringify(action.args || {}, null, 2);
-    const body = `
-      <div class="tool-args">${escapeHtml(args)}</div>
-      <div class="tool-output">${escapeHtml(action.output || "")}</div>
-      <div class="tool-meta">
-        <span class="pill ${action.ok ? "ok" : "bad"}">${ok}</span>
-        <span class="pill">keep ${(action.keep || []).length}</span>
-        <span class="pill">drop ${(action.drop || []).length}</span>
-      </div>
-    `;
-    thread.appendChild(message("assistant", `Step ${action.step}: ${action.name}`, body, true));
+    thread.appendChild(stepCard(action));
   }
 
   if (job?.status === "done") {
@@ -186,12 +182,93 @@ function renderThread(actions, task = "", job = null) {
   thread.scrollTop = thread.scrollHeight;
 }
 
+function threadHeading(job = null) {
+  const wrap = document.createElement("div");
+  wrap.className = "thread-heading";
+  const elapsed = job?.elapsed_seconds ? `${job.elapsed_seconds}s` : "waiting";
+  wrap.innerHTML = `
+    <div>
+      <span>Timeline</span>
+      <strong>agent loop</strong>
+    </div>
+    <code>${escapeHtml(elapsed)}</code>
+  `;
+  return wrap;
+}
+
+function stepCard(action) {
+  const ok = action.ok ? "ok" : "failed";
+  const args = JSON.stringify(action.args || {}, null, 2);
+  const context = action.context || {};
+  const compression = context.compression === undefined ? "-" : `${Math.round(context.compression * 100)}%`;
+  const tokens = context.selected_tokens === undefined ? "-" : `${context.selected_tokens}/${context.full_tokens}`;
+  const body = `
+    <div class="step-grid">
+      <div>
+        <div class="mini-label">thought</div>
+        <p>${escapeHtml(action.thought || "Choose the next local tool call.")}</p>
+      </div>
+      <div>
+        <div class="mini-label">context</div>
+        <div class="context-meter">
+          <span>${escapeHtml(tokens)}</span>
+          <strong>${escapeHtml(compression)}</strong>
+        </div>
+      </div>
+    </div>
+    <details open>
+      <summary>tool call</summary>
+      <pre class="tool-args">${escapeHtml(args)}</pre>
+    </details>
+    <details>
+      <summary>observation</summary>
+      <pre class="tool-output">${escapeHtml(action.output || "")}</pre>
+    </details>
+    <div class="tool-meta">
+      <span class="pill ${action.ok ? "ok" : "bad"}">${ok}</span>
+      <span class="pill">keep ${(action.keep || []).length}</span>
+      <span class="pill">drop ${(action.drop || []).length}</span>
+      <span class="pill">${escapeHtml(action.reason || "context selected")}</span>
+    </div>
+  `;
+  return message("assistant", `Step ${action.step}: ${action.name}`, body, true);
+}
+
 function renderContextPreview(result) {
   const keep = result.keep || [];
   const drop = result.drop || [];
   $("keepCount").textContent = keep.length;
   $("dropCount").textContent = drop.length;
-  const lines = [
+  updateText("context", formatContextPreview(result));
+  const body = `
+    <div class="step-grid">
+      <div>
+        <div class="mini-label">manager</div>
+        <p>${escapeHtml(result.manager)}</p>
+      </div>
+      <div>
+        <div class="mini-label">compression</div>
+        <div class="context-meter">
+          <span>${result.selected_tokens}/${result.full_tokens}</span>
+          <strong>${Math.round(result.compression * 100)}%</strong>
+        </div>
+      </div>
+    </div>
+    <div class="tool-meta">
+      <span class="pill ok">keep ${keep.length}</span>
+      <span class="pill">drop ${drop.length}</span>
+      <span class="pill">budget ${result.token_budget}</span>
+    </div>
+  `;
+  renderThread([], $("task").value);
+  $("thread").appendChild(message("assistant", `Manual compression: ${result.manager}`, body, true));
+  $("thread").scrollTop = $("thread").scrollHeight;
+}
+
+function formatContextPreview(result) {
+  const keep = result.keep || [];
+  const drop = result.drop || [];
+  return [
     `${result.manager}`,
     `budget: ${result.token_budget}`,
     `tokens: ${result.selected_tokens}/${result.full_tokens}`,
@@ -203,12 +280,7 @@ function renderContextPreview(result) {
     "",
     "DROP",
     ...drop.map(formatCandidate),
-  ];
-  updateText("context", lines.join("\n"));
-  const body = `tokens ${result.selected_tokens}/${result.full_tokens}, compression ${result.compression}\nkeep ${keep.length}, drop ${drop.length}`;
-  renderThread([], $("task").value);
-  $("thread").appendChild(message("assistant", `Manual compression: ${result.manager}`, body));
-  $("thread").scrollTop = $("thread").scrollHeight;
+  ].join("\n");
 }
 
 function formatCandidate(item) {
@@ -246,14 +318,29 @@ function renderContext(actions) {
   if (!actions.length) return "";
   return actions
     .map((action) => {
+      const context = action.context || {};
+      const candidateById = new Map((context.candidates || []).map((item) => [item.id, item]));
       return [
         `Step ${action.step} / ${action.name}`,
-        `keep: ${(action.keep || []).join(", ") || "-"}`,
-        `drop: ${(action.drop || []).join(", ") || "-"}`,
+        `tokens: ${context.selected_tokens ?? "-"}/${context.full_tokens ?? "-"} compression=${context.compression ?? "-"}`,
+        `keep: ${formatIds(action.keep || [], candidateById)}`,
+        `drop: ${formatIds(action.drop || [], candidateById)}`,
         `reason: ${action.reason || "-"}`,
       ].join("\n");
     })
     .join("\n\n");
+}
+
+function formatIds(ids, candidateById) {
+  if (!ids.length) return "-";
+  return ids
+    .map((id) => {
+      const candidate = candidateById.get(id);
+      if (!candidate) return id;
+      const path = candidate.metadata?.path ? ` ${candidate.metadata.path}` : "";
+      return `${id}[${candidate.kind}${path}, ${candidate.tokens}t]`;
+    })
+    .join(", ");
 }
 
 function renderFiles(files) {
@@ -281,7 +368,7 @@ function renderFiles(files) {
 async function openFile(path) {
   const workspace = $("workspace").value || currentWorkspace;
   const payload = await api(`/api/file?workspace=${encodeURIComponent(workspace)}&path=${encodeURIComponent(path)}`);
-  $("patch").textContent = payload.content;
+  updateText("patch", payload.content);
   activateTab("patch");
 }
 

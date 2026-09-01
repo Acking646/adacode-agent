@@ -137,18 +137,21 @@ def summarize_trace(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         action = row.get("action", {})
         result = row.get("result", {})
         selection = row.get("selection", {})
+        context = row.get("context", {})
         selected += len(selection.get("keep", []) or [])
         dropped += len(selection.get("drop", []) or [])
         actions.append(
             {
                 "step": row.get("step"),
                 "name": action.get("name"),
+                "thought": action.get("thought", ""),
                 "args": action.get("args", {}),
                 "ok": result.get("ok"),
                 "output": trim(str(result.get("output", "")), 2400),
                 "keep": selection.get("keep", []),
                 "drop": selection.get("drop", []),
                 "reason": selection.get("reason", ""),
+                "context": context,
             }
         )
     return {"steps": len(actions), "selected": selected, "dropped": dropped, "actions": actions}

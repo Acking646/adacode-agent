@@ -13,14 +13,11 @@
           <div class="mark">AC</div>
           <div>
             <h1>AdaCode</h1>
-            <p>coding agent workbench</p>
+            <p>local coding agent</p>
           </div>
         </div>
 
-        <button id="resetDemo" class="wide ghost" title="Reset the built-in demo workspace">
-          <span aria-hidden="true">↺</span>
-          Reset demo
-        </button>
+        <button id="resetDemo" class="wide ghost" title="Reset the built-in demo workspace">Reset demo</button>
 
         <section class="rail-section">
           <div class="section-title">Workspace</div>
@@ -65,20 +62,19 @@
             </label>
             <label>
               Budget
-              <input id="tokenBudget" type="number" min="50" step="50" value="80" />
+              <input id="tokenBudget" type="number" min="200" step="100" value="1200" />
             </label>
           </div>
-          <button id="compressContext" class="wide ghost" title="Preview one context compression pass">
-            Compress context
-          </button>
+          <p class="hint">Use 300-500 for a tight compression preview; use 800+ for an agent run.</p>
+          <button id="compressContext" class="wide ghost" title="Preview one context compression pass">Preview context</button>
         </section>
       </aside>
 
       <main class="center-pane">
         <header class="topbar">
           <div>
-            <div class="overline">Local agent session</div>
-            <strong id="status">Idle</strong>
+            <div class="overline">Session</div>
+            <strong id="status"><span class="status-dot idle"></span>Idle</strong>
           </div>
           <div class="metrics">
             <div><span>steps</span><strong id="steps">0</strong></div>
@@ -88,11 +84,18 @@
         </header>
 
         <section id="thread" class="thread">
+          <div class="thread-heading">
+            <div>
+              <span>Timeline</span>
+              <strong>agent loop</strong>
+            </div>
+            <code id="loopState">waiting</code>
+          </div>
           <article class="message assistant">
             <div class="avatar">AC</div>
             <div class="bubble">
               <div class="message-title">Ready</div>
-              <p>Reset the sample workspace, then run the agent. Each step below will show the local tool call, observation, and context selection.</p>
+              <p>Reset the workspace, preview context compression, then run the local agent.</p>
             </div>
           </article>
         </section>
@@ -104,10 +107,7 @@
               <span id="jobId">no job</span>
               <span id="cmModeLabel">Rule CM</span>
             </div>
-            <button id="runAgent" class="primary" title="Run the coding agent">
-              <span aria-hidden="true">▶</span>
-              Run
-            </button>
+            <button id="runAgent" class="primary" title="Run the coding agent">Run</button>
           </div>
         </footer>
       </main>

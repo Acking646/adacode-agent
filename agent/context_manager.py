@@ -132,6 +132,7 @@ class ContextManager:
         self.memory = memory
         self.selector = selector or RuleBasedSelectionModel()
         self.token_budget = token_budget
+        self.last_stats = {}
 
     def build_candidates(self, task: str, history: List[Message]) -> List[ContextCandidate]:
         candidates = [ContextCandidate("task_goal", "task", task, {"status": "active"})]
@@ -158,6 +159,22 @@ class ContextManager:
             selection.reason = f"Context manager failed ({type(exc).__name__}: {exc}); fell back to rule scoring."
         by_id = {candidate.id: candidate for candidate in candidates}
         selected = [by_id[item] for item in selection.keep if item in by_id]
+        full_tokens = sum(estimate_tokens(candidate.content) for candidate in candidates)
+        selected_tokens = sum(estimate_tokens(candidate.content) for candidate in selected)
+        self.last_stats = {
+            "full_tokens": full_tokens,
+            "selected_tokens": selected_tokens,
+            "compression": round(1.0 - selected_tokens / max(1, full_tokens), 4),
+            "candidates": [
+                {
+                    "id": candidate.id,
+                    "kind": candidate.kind,
+                    "tokens": estimate_tokens(candidate.content),
+                    "metadata": candidate.metadata,
+                }
+                for candidate in candidates
+            ],
+        }
 
         for update in selection.update_memory:
             card_id = update.get("id")
@@ -187,7 +204,10 @@ Return exactly one JSON object per response:
 
 Use local tools through JSON actions. Do not claim a file was changed until an
 edit_file or write_file action has been executed. Prefer running tests after a
-code change. Use finish only when the task is complete or blocked."""
+code change. After list_files, read the files most relevant to the task instead
+of listing files again. If a tool fails or gives incomplete information, choose a
+new action that gathers missing evidence. Use finish only when the task is
+complete or blocked."""
 
 
 def load_weights(path: Path) -> RewardWeights:
