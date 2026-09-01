@@ -28,6 +28,8 @@ class OpenAICompatibleClient:
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     temperature: float = 0.0
+    top_p: float = 1.0
+    max_tokens: int = 2048
     timeout: int = 180
     retries: int = 3
     retry_sleep: float = 5.0
@@ -42,6 +44,7 @@ class OpenAICompatibleClient:
         self.base_url = (self.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
         self.timeout = int(os.getenv("ADACODE_LLM_TIMEOUT", str(self.timeout)))
         self.retries = int(os.getenv("ADACODE_LLM_RETRIES", str(self.retries)))
+        self.max_tokens = int(os.getenv("ADACODE_LLM_MAX_TOKENS", str(self.max_tokens)))
 
     def complete(self, messages: List[Message]) -> str:
         if not self.api_key:
@@ -51,6 +54,8 @@ class OpenAICompatibleClient:
             "model": self.model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_tokens,
         }
         data = json.dumps(body).encode("utf-8")
         request = urllib.request.Request(
