@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 let cmMode = "rule";
 let currentJob = null;
 let currentWorkspace = $("workspace").value;
+let currentTask = "";
 let pollTimer = null;
 let lastRenderKey = "";
 let lastFilesKey = "";
@@ -82,6 +83,7 @@ async function resetDemo() {
   try {
     const payload = await api("/api/demo/reset", { method: "POST", body: "{}", timeoutMs: 10000 });
     currentWorkspace = payload.workspace;
+    currentTask = payload.task;
     $("workspace").value = payload.workspace;
     $("task").value = payload.task;
     lastFilesKey = "";
@@ -108,13 +110,16 @@ async function runAgent() {
   $("runAgent").disabled = true;
   setPreviewDisabled(true);
   try {
+    const submittedTask = $("task").value.trim();
+    if (!submittedTask) throw new Error("请输入需要执行的编程任务。");
+    currentTask = submittedTask;
     const budget = Number($("tokenBudget").value);
     setStatus("任务已提交", "running");
     lastRenderKey = "";
-    renderThread([], $("task").value);
+    renderThread([], currentTask);
     const payload = {
       workspace: $("workspace").value,
-      task: $("task").value,
+      task: currentTask,
       test_command: commandToList($("testCommand").value),
       model: $("model").value,
       base_url: $("baseUrl").value || null,
@@ -130,6 +135,7 @@ async function runAgent() {
     const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload), timeoutMs: 10000 });
     currentJob = started.job_id;
     $("jobId").textContent = currentJob;
+    $("task").value = "";
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(fetchJob, 3000);
     fetchJob();
@@ -144,10 +150,12 @@ async function previewContext(mode) {
   setPreviewDisabled(true);
   const name = mode === "qwen" ? "Qwen SFT" : "规则模型";
   try {
+    const previewTask = $("task").value.trim() || currentTask;
+    if (!previewTask) throw new Error("请先输入任务描述。");
     setStatus(`正在生成${name}压缩预览`, "running");
     const payload = {
       workspace: $("workspace").value,
-      task: $("task").value,
+      task: previewTask,
       cm_mode: mode,
       cm_base_url: $("cmBaseUrl").value,
       cm_model: $("cmModel").value,
@@ -156,7 +164,7 @@ async function previewContext(mode) {
     };
     const timeoutMs = mode === "qwen" ? 45000 : 8000;
     const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload), timeoutMs });
-    renderContextPreview(result);
+    renderContextPreview(result, previewTask);
     setStatus(`${result.manager}：保留 ${result.selected_tokens}/${result.full_tokens} tokens`, "idle");
   } catch (error) {
     setStatus(error.message, "failed");
@@ -211,7 +219,7 @@ function renderJob(job) {
 
   const key = `${job.status}:${trace.steps}:${job.patch_chars || 0}:${job.message || ""}`;
   if (key !== lastRenderKey) {
-    renderThread(trace.actions || [], $("task").value, job);
+    renderThread(trace.actions || [], currentTask, job);
     lastRenderKey = key;
   }
   renderFiles(job.files || []);
@@ -351,7 +359,7 @@ function stepCard(action) {
   return message("assistant", `步骤 ${action.step}：${label}`, body, true);
 }
 
-function renderContextPreview(result) {
+function renderContextPreview(result, task) {
   const keep = result.keep || [];
   const drop = result.drop || [];
   $("keepCount").textContent = keep.length;
@@ -379,7 +387,7 @@ function renderContextPreview(result) {
     </div>
   `;
   closeArtifact();
-  renderThread([], $("task").value);
+  renderThread([], task);
   $("thread").appendChild(message("assistant", `手动压缩预览：${result.manager}`, body, true));
   $("thread").scrollTop = $("thread").scrollHeight;
 }

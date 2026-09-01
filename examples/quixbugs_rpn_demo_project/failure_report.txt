@@ -1,0 +1,7 @@
+失败测试摘要
+
+- test_subtraction_keeps_operand_order：期望 5，实际 -5
+- test_division_keeps_operand_order：期望 4，实际 0.25
+- test_compound_expression：最终结果不符合预期
+
+加法和乘法测试已经通过，公开函数签名不能改变。

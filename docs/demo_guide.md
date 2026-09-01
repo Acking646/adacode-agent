@@ -63,17 +63,17 @@ http://127.0.0.1:7860
 Keep the screen identity-neutral. Do not show names, school names, API keys, shell history, or account pages.
 
 1. Reset the demo workspace.
-2. Show the task: fix `event_metrics.py` so the tests pass.
-3. Set Budget to `400`, click `Rule preview`, and show kept/dropped snippets plus compression.
+2. Show the QuixBugs-derived task: fix operand order in the Reverse Polish Notation calculator.
+3. Keep Preview Budget at `400`, click `Rule preview`, and show kept/dropped snippets plus compression.
 4. Click `Qwen preview` with URL `http://127.0.0.1:8001/v1` and model `cm` to show the trained context manager.
-5. Set Budget back to `1200`, then start the agent. The agent reads local files, calls the model, edits code, runs tests, and stops when tests pass or the step limit is reached.
+5. Keep Run Budget at `1600`, then start the agent. The agent reads local files, calls the model, edits code, runs tests, and stops when tests pass or the step limit is reached.
 6. Show the inline Patch, Tests, and Context artifacts in the center workbench.
 7. Briefly explain the design: self-written controller loop, JSON action parser, local tool executor, rule/Qwen context manager, and reproducible evaluation with context-selection metrics.
 
 Recommended task text:
 
 ```text
-Fix the event metrics implementation so the tests pass. Preserve the public function names.
+修复逆波兰表达式计算器，使全部测试通过。保持 evaluate(tokens) 接口不变。
 ```
 
 Recommended test command:
