@@ -37,7 +37,8 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit(
             "Missing training dependencies. Install optional packages first:\n"
-            "pip install transformers datasets peft accelerate torch"
+            "pip install transformers datasets peft accelerate torch\n"
+            f"Original import error: {type(exc).__name__}: {exc}"
         ) from exc
 
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
