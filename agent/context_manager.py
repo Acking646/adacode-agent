@@ -47,7 +47,7 @@ class RuleBasedSelectionModel:
                 keep.append(candidate.id)
                 used += cost
         drop = [candidate.id for candidate in candidates if candidate.id not in keep]
-        return ContextSelection(keep=keep, drop=drop, reason="Rule-based reward scoring selected compact context.")
+        return ContextSelection(keep=keep, drop=drop, reason="规则奖励评分选择了紧凑上下文。")
 
     def _score(self, task: str, index: int, candidate: ContextCandidate) -> float:
         text = candidate.content.lower()
@@ -156,7 +156,7 @@ class ContextManager:
         except Exception as exc:
             fallback = RuleBasedSelectionModel()
             selection = fallback.select(task, candidates, self.token_budget)
-            selection.reason = f"Context manager failed ({type(exc).__name__}: {exc}); fell back to rule scoring."
+            selection.reason = f"上下文管理器失败（{type(exc).__name__}: {exc}），已回退到规则评分。"
         by_id = {candidate.id: candidate for candidate in candidates}
         selected = [by_id[item] for item in selection.keep if item in by_id]
         full_tokens = sum(estimate_tokens(candidate.content) for candidate in candidates)
@@ -197,7 +197,7 @@ CODING_SYSTEM_PROMPT = """You are a coding agent.
 
 Return exactly one JSON object per response:
 {
-  "thought": "short reasoning",
+  "thought": "用简体中文简要说明当前判断",
   "action": "list_files|read_file|write_file|edit_file|run_command|run_tests|finish",
   "args": {}
 }
@@ -207,7 +207,12 @@ edit_file or write_file action has been executed. Prefer running tests after a
 code change. After list_files, read the files most relevant to the task instead
 of listing files again. If a tool fails or gives incomplete information, choose a
 new action that gathers missing evidence. Use finish only when the task is
-complete or blocked."""
+complete or blocked.
+
+Write every thought and the finish summary in Simplified Chinese. Prioritize the
+target implementation and its tests over unrelated files. Do not read an
+unchanged file twice unless a tool result shows that more lines are needed. Once
+you have enough evidence, edit the code promptly and reserve time to run tests."""
 
 
 def load_weights(path: Path) -> RewardWeights:

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AdaCode Workbench</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260901-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260901-2" />
   </head>
   <body>
     <div class="workbench">
@@ -13,62 +13,66 @@
           <div class="mark">AC</div>
           <div>
             <h1>AdaCode</h1>
-            <p>local coding agent</p>
+            <p>本地编程智能体</p>
           </div>
         </div>
 
-        <button id="resetDemo" class="wide ghost" title="Reset the demo workspace">Reset demo</button>
+        <button id="resetDemo" class="wide ghost" title="恢复演示工作区">重置演示</button>
 
         <section class="rail-section">
-          <div class="section-title">Workspace</div>
+          <div class="section-title">工作区</div>
           <input id="workspace" value="outputs/web_demo_workspace" />
           <div id="fileList" class="file-tree"></div>
         </section>
 
         <section class="rail-section">
-          <div class="section-title">Runtime</div>
+          <div class="section-title">运行设置</div>
           <label>
-            Test command
+            测试命令
             <input id="testCommand" value="python -m pytest -q" />
           </label>
           <label>
-            Main model
+            主模型
             <input id="model" value="deepseek-ai/DeepSeek-V4-Flash" />
           </label>
           <label>
-            API base URL
-            <input id="baseUrl" value="" placeholder="from OPENAI_BASE_URL" />
+            API 地址
+            <input id="baseUrl" value="" placeholder="读取 OPENAI_BASE_URL" />
           </label>
         </section>
 
         <section class="rail-section">
-          <div class="section-title">Run context manager</div>
+          <div class="section-title">上下文管理器</div>
           <div class="segmented" role="tablist" aria-label="context manager mode">
-            <button id="cmRule" class="active" data-mode="rule">Rule</button>
+            <button id="cmRule" class="active" data-mode="rule">规则模型</button>
             <button id="cmQwen" data-mode="qwen">Qwen SFT</button>
           </div>
           <label>
-            Qwen endpoint
+            Qwen 服务地址
             <input id="cmBaseUrl" value="http://127.0.0.1:8001/v1" />
           </label>
           <label>
-            Qwen model
+            Qwen 模型名
             <input id="cmModel" value="cm" />
           </label>
           <div class="inline-fields">
             <label>
-              Steps
-              <input id="maxSteps" type="number" min="1" max="30" value="8" />
+              最大步骤
+              <input id="maxSteps" type="number" min="1" max="30" value="12" />
             </label>
             <label>
-              Budget
-              <input id="tokenBudget" type="number" min="200" step="100" value="1200" />
+              运行预算
+              <input id="tokenBudget" type="number" min="800" step="100" value="1600" />
             </label>
           </div>
-          <p class="hint">Use 400 for preview, then switch back to 1200 before Run.</p>
+          <label>
+            压缩预览预算
+            <input id="previewBudget" type="number" min="200" step="100" value="400" />
+          </label>
+          <p class="hint">预览使用紧预算展示压缩效果，正式运行保留更完整的操作历史。</p>
           <div class="preview-buttons">
-            <button id="previewRule" class="ghost" title="Preview with the local rule manager">Rule preview</button>
-            <button id="previewQwen" class="ghost" title="Preview with the remote Qwen SFT manager">Qwen preview</button>
+            <button id="previewRule" class="ghost" title="使用本地规则模型预览">规则预览</button>
+            <button id="previewQwen" class="ghost" title="使用远程 Qwen SFT 模型预览">Qwen 预览</button>
           </div>
         </section>
       </aside>
@@ -76,26 +80,26 @@
       <main class="center-pane">
         <header class="topbar">
           <div>
-            <div class="overline">Session</div>
-            <strong id="status"><span class="status-dot idle"></span>Idle</strong>
+            <div class="overline">当前任务</div>
+            <strong id="status"><span class="status-dot idle"></span>就绪</strong>
           </div>
           <div class="metrics">
-            <div><span>steps</span><strong id="steps">0</strong></div>
-            <div><span>keep/drop</span><strong><b id="keepCount">0</b>/<b id="dropCount">0</b></strong></div>
-            <div><span>patch</span><strong id="patchChars">0 chars</strong></div>
+            <div><span>步骤</span><strong id="steps">0</strong></div>
+            <div><span>保留/丢弃</span><strong><b id="keepCount">0</b>/<b id="dropCount">0</b></strong></div>
+            <div><span>补丁</span><strong id="patchChars">0 字符</strong></div>
           </div>
         </header>
 
         <section class="artifact-bar" aria-label="run artifacts">
-          <button id="showPatch" class="artifact-chip" data-artifact="patch">Patch <span id="patchBadge">empty</span></button>
-          <button id="showTests" class="artifact-chip" data-artifact="tests">Tests <span id="testsBadge">waiting</span></button>
-          <button id="showContext" class="artifact-chip" data-artifact="context">Context <span id="contextBadge">waiting</span></button>
+          <button id="showPatch" class="artifact-chip" data-artifact="patch">代码补丁 <span id="patchBadge">暂无</span></button>
+          <button id="showTests" class="artifact-chip" data-artifact="tests">测试结果 <span id="testsBadge">等待</span></button>
+          <button id="showContext" class="artifact-chip" data-artifact="context">上下文 <span id="contextBadge">等待</span></button>
         </section>
 
         <section id="artifactPanel" class="artifact-panel hidden">
           <div class="artifact-head">
-            <strong id="artifactTitle">Artifact</strong>
-            <button id="closeArtifact" class="ghost">Close</button>
+            <strong id="artifactTitle">运行产物</strong>
+            <button id="closeArtifact" class="ghost">关闭</button>
           </div>
           <pre id="artifactText"></pre>
         </section>
@@ -103,33 +107,33 @@
         <section id="thread" class="thread">
           <div class="thread-heading">
             <div>
-              <span>Timeline</span>
-              <strong>agent loop</strong>
+              <span>执行时间线</span>
+              <strong>智能体循环</strong>
             </div>
-            <code id="loopState">waiting</code>
+            <code id="loopState">等待</code>
           </div>
           <article class="message assistant">
             <div class="avatar">AC</div>
             <div class="bubble">
-              <div class="message-title">Ready</div>
-              <p>Reset the workspace, preview compression, then run the local agent.</p>
+              <div class="message-title">准备就绪</div>
+              <p>智能体将读取本地文件、执行命令、修改代码，并在每轮模型调用前压缩上下文。</p>
             </div>
           </article>
         </section>
 
         <footer class="composer">
-          <textarea id="task" rows="3" placeholder="Describe a coding task for the agent..."></textarea>
+          <textarea id="task" rows="3" placeholder="描述需要智能体完成的编程任务……"></textarea>
           <div class="composer-actions">
             <div class="run-meta">
-              <span id="jobId">no job</span>
-              <span id="cmModeLabel">Rule CM</span>
+              <span id="jobId">尚未运行</span>
+              <span id="cmModeLabel">规则上下文</span>
             </div>
-            <button id="runAgent" class="primary" title="Run the coding agent">Run</button>
+            <button id="runAgent" class="primary" title="运行编程智能体">运行</button>
           </div>
         </footer>
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260901-1"></script>
+    <script src="/static/app.js?v=20260901-2"></script>
   </body>
 </html>

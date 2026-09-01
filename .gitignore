@@ -9,6 +9,7 @@ venv/
 env/
 .env
 *.log
+!examples/context_demo_project/debug_notes.log
 outputs/
 checkpoints/
 models/*

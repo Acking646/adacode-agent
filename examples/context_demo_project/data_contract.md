@@ -1,10 +1,9 @@
-# Event Metrics Data Contract
+# 事件指标数据约定
 
-Each event row is a dictionary with optional fields:
+每条事件记录都是一个字典，包含以下可选字段：
 
-- `event`: human-readable event name.
-- `status`: either `ok` or `failed`; missing status is treated as `ok`.
+- `event`：人类可读的事件名称。
+- `status`：取值为 `ok` 或 `failed`；缺省时按 `ok` 处理。
 
-Malformed rows without a non-empty `event` value should be ignored. Event names
-are normalized before counting so that equivalent spellings are grouped
-together.
+缺少非空 `event` 值的错误记录应被忽略。统计前需要规范化事件名称，使不同
+写法但含义相同的事件归入同一组。

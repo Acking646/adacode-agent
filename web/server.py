@@ -185,7 +185,7 @@ def preview_context(payload: Dict[str, Any]) -> Dict[str, Any]:
     mode = str(payload.get("cm_mode") or "rule")
     candidates = build_preview_candidates(workspace, task)
     selector: Any = RuleBasedSelectionModel()
-    manager_name = "Rule CM"
+    manager_name = "规则上下文管理器"
     if mode == "qwen":
         cm_llm = OpenAICompatibleClient(
             model=str(payload.get("cm_model") or "cm"),
@@ -198,7 +198,7 @@ def preview_context(payload: Dict[str, Any]) -> Dict[str, Any]:
             retries=2,
         )
         selector = TrainedJSONSelectionModel(cm_llm)
-        manager_name = "Qwen SFT CM"
+        manager_name = "Qwen SFT 上下文管理器"
 
     selection = selector.select(task, candidates, token_budget)
     by_id = {candidate.id: candidate for candidate in candidates}
@@ -307,10 +307,11 @@ def worker(job_id: str, payload: Dict[str, Any]) -> None:
         patch = git_diff(workspace)
         rows = parse_trace(trace_path)
         trace_summary = summarize_trace(rows)
+        tests_passed = bool(after.get("ok"))
         set_job(
             job_id,
-            status="done",
-            message="Completed",
+            status="done" if tests_passed else "failed",
+            message="Completed" if tests_passed else "Tests still failing",
             summary=summary,
             before=before,
             after=after,

@@ -86,7 +86,7 @@ class CodingAgent:
                 break
 
         if not final_summary:
-            final_summary = "Stopped after reaching max_steps."
+            final_summary = "已达到最大执行步数，任务尚未主动结束。"
         return final_summary
 
     def _id(self, prefix: str) -> str:

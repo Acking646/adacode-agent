@@ -8,6 +8,29 @@ let lastRenderKey = "";
 let lastFilesKey = "";
 let activeArtifact = "";
 const artifacts = { patch: "", tests: "", context: "" };
+const toolLabels = {
+  list_files: "列出文件",
+  read_file: "读取文件",
+  write_file: "写入文件",
+  edit_file: "修改文件",
+  run_command: "执行命令",
+  run_tests: "运行测试",
+  finish: "结束任务",
+};
+const jobLabels = {
+  queued: "已排队",
+  running: "运行中",
+  done: "已完成",
+  failed: "运行失败",
+};
+const messageLabels = {
+  Queued: "等待执行",
+  "Preparing workspace": "准备工作区并运行初始测试",
+  "Running agent": "调用模型并执行本地工具",
+  Completed: "任务结束",
+  "Tests still failing": "任务结束，但测试仍未通过",
+};
+const stateLabels = { idle: "就绪", running: "运行中", failed: "失败" };
 
 function commandToList(text) {
   return text.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((item) => item.replace(/^"|"$/g, "")) || [];
@@ -28,7 +51,7 @@ async function api(path, options = {}) {
     return payload;
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Request timed out. Qwen preview can be skipped if the tunnel or GPU is busy.");
+      throw new Error("请求超时。若正在预览 Qwen，请检查 SSH 隧道和远程 GPU 服务。");
     }
     throw error;
   } finally {
@@ -39,12 +62,12 @@ async function api(path, options = {}) {
 function setStatus(text, state = "idle") {
   $("status").innerHTML = `<span class="status-dot ${state}"></span>${escapeHtml(text)}`;
   const loopState = $("loopState");
-  if (loopState) loopState.textContent = state;
+  if (loopState) loopState.textContent = stateLabels[state] || state;
 }
 
 function reportUiError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  setStatus(`UI error: ${message}`, "failed");
+  setStatus(`界面错误：${message}`, "failed");
   console.error(error);
 }
 
@@ -66,8 +89,8 @@ async function resetDemo() {
     $("steps").textContent = "0";
     $("keepCount").textContent = "0";
     $("dropCount").textContent = "0";
-    $("patchChars").textContent = "0 chars";
-    $("jobId").textContent = "no job";
+    $("patchChars").textContent = "0 字符";
+    $("jobId").textContent = "尚未运行";
     artifacts.patch = "";
     artifacts.tests = "";
     artifacts.context = "";
@@ -75,7 +98,7 @@ async function resetDemo() {
     closeArtifact();
     lastRenderKey = "";
     renderThread([]);
-    setStatus("Demo reset", "idle");
+    setStatus("演示工作区已重置", "idle");
   } finally {
     $("resetDemo").disabled = false;
   }
@@ -86,7 +109,7 @@ async function runAgent() {
   setPreviewDisabled(true);
   try {
     const budget = Number($("tokenBudget").value);
-    setStatus(budget < 800 ? "Queued with tight context" : "Queued", "running");
+    setStatus("任务已提交", "running");
     lastRenderKey = "";
     renderThread([], $("task").value);
     const payload = {
@@ -119,9 +142,9 @@ async function runAgent() {
 
 async function previewContext(mode) {
   setPreviewDisabled(true);
-  const name = mode === "qwen" ? "Qwen SFT" : "Rule";
+  const name = mode === "qwen" ? "Qwen SFT" : "规则模型";
   try {
-    setStatus(`${name} context preview`, "running");
+    setStatus(`正在生成${name}压缩预览`, "running");
     const payload = {
       workspace: $("workspace").value,
       task: $("task").value,
@@ -129,16 +152,15 @@ async function previewContext(mode) {
       cm_base_url: $("cmBaseUrl").value,
       cm_model: $("cmModel").value,
       cm_api_key: "EMPTY",
-      token_budget: Number($("tokenBudget").value),
+      token_budget: Number($("previewBudget").value),
     };
     const timeoutMs = mode === "qwen" ? 45000 : 8000;
     const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload), timeoutMs });
     renderContextPreview(result);
-    showArtifact("context");
-    setStatus(`${result.manager}: ${result.selected_tokens}/${result.full_tokens} tokens`, "idle");
+    setStatus(`${result.manager}：保留 ${result.selected_tokens}/${result.full_tokens} tokens`, "idle");
   } catch (error) {
     setStatus(error.message, "failed");
-    artifacts.context = `${name} preview failed\n${error.message}`;
+    artifacts.context = `${name}预览失败\n${error.message}`;
     updateArtifactBadges();
     showArtifact("context");
   } finally {
@@ -171,16 +193,18 @@ async function fetchJob() {
 function renderJob(job) {
   const trace = job.trace || { actions: [], steps: 0, selected: 0, dropped: 0 };
   const state = job.status === "failed" ? "failed" : job.status === "running" ? "running" : "idle";
-  setStatus(`${job.status}: ${job.message || ""}`, state);
+  const statusText = jobLabels[job.status] || job.status;
+  const messageText = messageLabels[job.message] || job.message || "";
+  setStatus(`${statusText}${messageText ? `：${messageText}` : ""}`, state);
   $("steps").textContent = trace.steps || 0;
   $("keepCount").textContent = trace.selected || 0;
   $("dropCount").textContent = trace.dropped || 0;
-  $("patchChars").textContent = `${job.patch_chars || 0} chars`;
+  $("patchChars").textContent = `${job.patch_chars || 0} 字符`;
 
   artifacts.patch = job.patch || "";
-  const before = job.before ? formatTest("Before", job.before) : "";
-  const after = job.after ? formatTest("After", job.after) : "";
-  artifacts.tests = [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n");
+  const before = job.before ? formatTest("修改前", job.before) : "";
+  const after = job.after ? formatTest("修改后", job.after) : "";
+  artifacts.tests = [before, after, job.summary ? `任务总结\n${job.summary}` : ""].filter(Boolean).join("\n\n");
   artifacts.context = renderContext(trace.actions || []);
   updateArtifactBadges(job);
   refreshOpenArtifact();
@@ -194,24 +218,24 @@ function renderJob(job) {
 }
 
 function updateArtifactBadges(job = null) {
-  $("patchBadge").textContent = artifacts.patch ? `${artifacts.patch.length} chars` : "empty";
+  $("patchBadge").textContent = artifacts.patch ? `${artifacts.patch.length} 字符` : "暂无";
   if (job?.after) {
-    $("testsBadge").textContent = job.after.ok ? "passed" : "failed";
+    $("testsBadge").textContent = job.after.ok ? "通过" : "失败";
   } else {
-    $("testsBadge").textContent = artifacts.tests ? "ready" : "waiting";
+    $("testsBadge").textContent = artifacts.tests ? "可查看" : "等待";
   }
-  $("contextBadge").textContent = artifacts.context ? "ready" : "waiting";
+  $("contextBadge").textContent = artifacts.context ? "可查看" : "等待";
 }
 
 function showArtifact(kind) {
   activeArtifact = kind;
   const titles = {
-    patch: "Patch",
-    tests: "Test output",
-    context: "Context selection",
+    patch: "代码补丁",
+    tests: "测试输出",
+    context: "上下文选择",
   };
-  $("artifactTitle").textContent = titles[kind] || "Artifact";
-  $("artifactText").textContent = artifacts[kind] || "No data yet.";
+  $("artifactTitle").textContent = titles[kind] || "运行产物";
+  $("artifactText").textContent = artifacts[kind] || "暂无数据。";
   $("artifactPanel").classList.remove("hidden");
   document.querySelectorAll(".artifact-chip").forEach((button) => {
     button.classList.toggle("active", button.dataset.artifact === kind);
@@ -220,7 +244,7 @@ function showArtifact(kind) {
 
 function refreshOpenArtifact() {
   if (!activeArtifact || $("artifactPanel").classList.contains("hidden")) return;
-  $("artifactText").textContent = artifacts[activeArtifact] || "No data yet.";
+  $("artifactText").textContent = artifacts[activeArtifact] || "暂无数据。";
 }
 
 function closeArtifact() {
@@ -230,24 +254,26 @@ function closeArtifact() {
 }
 
 function formatTest(title, payload) {
-  const status = payload.ok ? "passed" : "failed";
-  return `${title}: ${status} (returncode=${payload.returncode})\n${payload.output || ""}`;
+  const status = payload.ok ? "通过" : "失败";
+  return `${title}：${status}（退出码=${payload.returncode}）\n${payload.output || ""}`;
 }
 
 function renderThread(actions, task = "", job = null) {
   const thread = $("thread");
+  const previousTop = thread.scrollTop;
+  const shouldFollow = !activeArtifact && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
   thread.innerHTML = "";
   thread.appendChild(threadHeading(job));
-  thread.appendChild(message("assistant", "Ready", "I will inspect local files, execute tools, edit code, run tests, and compress context before each model call."));
+  thread.appendChild(message("assistant", "准备就绪", "我会读取本地文件、执行工具、修改代码、运行测试，并在每次模型调用前压缩上下文。"));
   if (task.trim()) {
-    thread.appendChild(message("user", "Task", task.trim()));
+    thread.appendChild(message("user", "编程任务", task.trim()));
   }
 
   if (!actions.length) {
     if (job?.status === "running") {
-      thread.appendChild(message("assistant", "Working", "Preparing the first local tool call."));
+      thread.appendChild(message("assistant", "正在处理", "正在准备第一次本地工具调用。"));
     }
-    thread.scrollTop = thread.scrollHeight;
+    restoreThreadScroll(thread, shouldFollow, previousTop);
     return;
   }
 
@@ -256,22 +282,30 @@ function renderThread(actions, task = "", job = null) {
   }
 
   if (job?.status === "done") {
-    const result = job.after?.ok ? "Tests passed after the patch." : "Run finished; inspect the patch and test output.";
-    thread.appendChild(message("assistant", "Result", result));
+    const result = job.after?.ok ? "代码修改完成，测试已经通过。" : "任务已停止，请查看测试输出和执行时间线。";
+    thread.appendChild(message("assistant", "运行结果", result));
   } else if (job?.status === "failed") {
-    thread.appendChild(message("assistant", "Stopped", job.message || "The run stopped with an error."));
+    thread.appendChild(message("assistant", "异常停止", job.message || "运行过程中发生错误。"));
   }
-  thread.scrollTop = thread.scrollHeight;
+  restoreThreadScroll(thread, shouldFollow, previousTop);
+}
+
+function restoreThreadScroll(thread, shouldFollow, previousTop) {
+  if (shouldFollow) {
+    thread.scrollTop = thread.scrollHeight;
+  } else {
+    thread.scrollTop = previousTop;
+  }
 }
 
 function threadHeading(job = null) {
   const wrap = document.createElement("div");
   wrap.className = "thread-heading";
-  const elapsed = job?.elapsed_seconds ? `${job.elapsed_seconds}s` : "waiting";
+  const elapsed = job?.elapsed_seconds ? `${job.elapsed_seconds} 秒` : "等待";
   wrap.innerHTML = `
     <div>
-      <span>Timeline</span>
-      <strong>agent loop</strong>
+      <span>执行时间线</span>
+      <strong>智能体循环</strong>
     </div>
     <code id="loopState">${escapeHtml(elapsed)}</code>
   `;
@@ -279,7 +313,7 @@ function threadHeading(job = null) {
 }
 
 function stepCard(action) {
-  const ok = action.ok ? "ok" : "failed";
+  const ok = action.ok ? "成功" : "失败";
   const args = JSON.stringify(action.args || {}, null, 2);
   const context = action.context || {};
   const compression = context.compression === undefined ? "-" : `${Math.round(context.compression * 100)}%`;
@@ -287,11 +321,11 @@ function stepCard(action) {
   const body = `
     <div class="step-grid">
       <div>
-        <div class="mini-label">thought</div>
-        <p>${escapeHtml(action.thought || "Choose the next local tool call.")}</p>
+        <div class="mini-label">当前判断</div>
+        <p>${escapeHtml(action.thought || "选择下一项本地工具操作。")}</p>
       </div>
       <div>
-        <div class="mini-label">context</div>
+        <div class="mini-label">上下文</div>
         <div class="context-meter">
           <span>${escapeHtml(tokens)}</span>
           <strong>${escapeHtml(compression)}</strong>
@@ -299,21 +333,22 @@ function stepCard(action) {
       </div>
     </div>
     <details open>
-      <summary>tool call</summary>
+      <summary>工具参数</summary>
       <pre class="tool-args">${escapeHtml(args)}</pre>
     </details>
     <details>
-      <summary>observation</summary>
+      <summary>执行结果</summary>
       <pre class="tool-output">${escapeHtml(action.output || "")}</pre>
     </details>
     <div class="tool-meta">
       <span class="pill ${action.ok ? "ok" : "bad"}">${ok}</span>
-      <span class="pill">keep ${(action.keep || []).length}</span>
-      <span class="pill">drop ${(action.drop || []).length}</span>
-      <span class="pill">${escapeHtml(action.reason || "context selected")}</span>
+      <span class="pill">保留 ${(action.keep || []).length}</span>
+      <span class="pill">丢弃 ${(action.drop || []).length}</span>
+      <span class="pill">${escapeHtml(localizeReason(action.reason || "已完成上下文选择"))}</span>
     </div>
   `;
-  return message("assistant", `Step ${action.step}: ${action.name}`, body, true);
+  const label = toolLabels[action.name] || action.name;
+  return message("assistant", `步骤 ${action.step}：${label}`, body, true);
 }
 
 function renderContextPreview(result) {
@@ -326,11 +361,11 @@ function renderContextPreview(result) {
   const body = `
     <div class="step-grid">
       <div>
-        <div class="mini-label">manager</div>
+        <div class="mini-label">管理器</div>
         <p>${escapeHtml(result.manager)}</p>
       </div>
       <div>
-        <div class="mini-label">compression</div>
+        <div class="mini-label">压缩率</div>
         <div class="context-meter">
           <span>${result.selected_tokens}/${result.full_tokens}</span>
           <strong>${Math.round(result.compression * 100)}%</strong>
@@ -338,13 +373,14 @@ function renderContextPreview(result) {
       </div>
     </div>
     <div class="tool-meta">
-      <span class="pill ok">keep ${keep.length}</span>
-      <span class="pill">drop ${drop.length}</span>
-      <span class="pill">budget ${result.token_budget}</span>
+      <span class="pill ok">保留 ${keep.length}</span>
+      <span class="pill">丢弃 ${drop.length}</span>
+      <span class="pill">预算 ${result.token_budget}</span>
     </div>
   `;
+  closeArtifact();
   renderThread([], $("task").value);
-  $("thread").appendChild(message("assistant", `Manual compression: ${result.manager}`, body, true));
+  $("thread").appendChild(message("assistant", `手动压缩预览：${result.manager}`, body, true));
   $("thread").scrollTop = $("thread").scrollHeight;
 }
 
@@ -353,22 +389,22 @@ function formatContextPreview(result) {
   const drop = result.drop || [];
   return [
     `${result.manager}`,
-    `budget: ${result.token_budget}`,
-    `tokens: ${result.selected_tokens}/${result.full_tokens}`,
-    `compression: ${result.compression}`,
-    `reason: ${result.reason || "-"}`,
+    `预算：${result.token_budget}`,
+    `Token：${result.selected_tokens}/${result.full_tokens}`,
+    `压缩率：${result.compression}`,
+    `原因：${localizeReason(result.reason || "-")}`,
     "",
-    "KEEP",
+    "保留内容",
     ...keep.map(formatCandidate),
     "",
-    "DROP",
+    "丢弃内容",
     ...drop.map(formatCandidate),
   ].join("\n");
 }
 
 function formatCandidate(item) {
   const path = item.metadata?.path ? ` ${item.metadata.path}` : "";
-  return `- ${item.id} [${item.kind}]${path} (${item.tokens} tokens)\n${item.content}`;
+  return `- ${item.id} [${item.kind}]${path}（${item.tokens} tokens）\n${item.content}`;
 }
 
 function message(role, title, body, html = false) {
@@ -376,12 +412,12 @@ function message(role, title, body, html = false) {
   article.className = `message ${role}`;
   const avatar = document.createElement("div");
   avatar.className = "avatar";
-  avatar.textContent = role === "user" ? "ME" : "AC";
+  avatar.textContent = role === "user" ? "我" : "AC";
   const bubble = document.createElement("div");
   bubble.className = "bubble";
   const titleEl = document.createElement("div");
   titleEl.className = "message-title";
-  titleEl.innerHTML = `<span>${escapeHtml(title)}</span><code>${role}</code>`;
+  titleEl.innerHTML = `<span>${escapeHtml(title)}</span><code>${role === "user" ? "用户" : "智能体"}</code>`;
   const content = document.createElement("div");
   if (html) {
     content.innerHTML = body;
@@ -404,11 +440,11 @@ function renderContext(actions) {
       const context = action.context || {};
       const candidateById = new Map((context.candidates || []).map((item) => [item.id, item]));
       return [
-        `Step ${action.step} / ${action.name}`,
-        `tokens: ${context.selected_tokens ?? "-"}/${context.full_tokens ?? "-"} compression=${context.compression ?? "-"}`,
-        `keep: ${formatIds(action.keep || [], candidateById)}`,
-        `drop: ${formatIds(action.drop || [], candidateById)}`,
-        `reason: ${action.reason || "-"}`,
+        `步骤 ${action.step} / ${toolLabels[action.name] || action.name}`,
+        `Token：${context.selected_tokens ?? "-"}/${context.full_tokens ?? "-"}，压缩率=${context.compression ?? "-"}`,
+        `保留：${formatIds(action.keep || [], candidateById)}`,
+        `丢弃：${formatIds(action.drop || [], candidateById)}`,
+        `原因：${localizeReason(action.reason || "-")}`,
       ].join("\n");
     })
     .join("\n\n");
@@ -426,6 +462,14 @@ function formatIds(ids, candidateById) {
     .join(", ");
 }
 
+function localizeReason(reason) {
+  return String(reason)
+    .replace("Rule-based reward scoring selected compact context.", "规则奖励评分选择了紧凑上下文。")
+    .replace("SFT manager selected context.", "SFT 模型完成了上下文选择。")
+    .replace("Context manager failed", "上下文管理器失败")
+    .replace("fell back to rule scoring", "已回退到规则评分");
+}
+
 function renderFiles(files) {
   const list = $("fileList");
   const key = files.join("\n");
@@ -435,7 +479,7 @@ function renderFiles(files) {
   if (!files.length) {
     const empty = document.createElement("span");
     empty.className = "muted-line";
-    empty.textContent = "No files loaded";
+    empty.textContent = "尚未载入文件";
     list.appendChild(empty);
     return;
   }
@@ -452,9 +496,9 @@ async function openFile(path) {
   const workspace = $("workspace").value || currentWorkspace;
   const payload = await api(`/api/file?workspace=${encodeURIComponent(workspace)}&path=${encodeURIComponent(path)}`, { timeoutMs: 8000 });
   artifacts.patch = payload.content;
-  $("patchBadge").textContent = "file";
+  $("patchBadge").textContent = "文件";
   showArtifact("patch");
-  $("artifactTitle").textContent = `File: ${path}`;
+  $("artifactTitle").textContent = `文件：${path}`;
 }
 
 function escapeHtml(text) {
@@ -468,14 +512,20 @@ function escapeHtml(text) {
 document.querySelectorAll(".segmented button").forEach((button) => {
   button.addEventListener("click", () => {
     cmMode = button.dataset.mode;
-    $("cmModeLabel").textContent = cmMode === "qwen" ? "Qwen SFT CM" : "Rule CM";
+    $("cmModeLabel").textContent = cmMode === "qwen" ? "Qwen SFT 上下文" : "规则上下文";
     document.querySelectorAll(".segmented button").forEach((item) => item.classList.remove("active"));
     button.classList.add("active");
   });
 });
 
 document.querySelectorAll(".artifact-chip").forEach((button) => {
-  button.addEventListener("click", () => showArtifact(button.dataset.artifact));
+  button.addEventListener("click", () => {
+    if (activeArtifact === button.dataset.artifact && !$("artifactPanel").classList.contains("hidden")) {
+      closeArtifact();
+    } else {
+      showArtifact(button.dataset.artifact);
+    }
+  });
 });
 
 $("closeArtifact").addEventListener("click", closeArtifact);

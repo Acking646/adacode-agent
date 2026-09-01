@@ -1,4 +1,4 @@
-Fix the event metrics implementation so the tests pass.
+修复事件指标统计模块，使全部测试通过。
 
-The report should normalize event names, ignore malformed rows, count only valid
-events, and compute error_rate as failed_events / valid_events.
+统计时需要规范化事件名称、忽略格式错误的数据、只计算有效事件，并将
+error_rate 定义为 failed_events / valid_events。请修改实现并运行测试验证。

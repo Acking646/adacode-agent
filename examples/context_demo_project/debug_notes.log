@@ -1,0 +1,6 @@
+上一次失败测试摘要：
+
+FAILED test_event_metrics.py::test_normalize_event_name
+FAILED test_event_metrics.py::test_summarize_events_ignores_malformed_rows
+
+疑似问题位于事件名称规范化，以及对上游埋点客户端不完整记录的处理逻辑。
