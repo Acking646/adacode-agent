@@ -64,10 +64,10 @@ Keep the screen identity-neutral. Do not show names, school names, API keys, she
 
 1. Reset the demo workspace.
 2. Show the task: fix `event_metrics.py` so the tests pass.
-3. Run manual context compression with Rule CM and show kept/dropped snippets plus compression.
-4. Switch to Qwen CM, use URL `http://127.0.0.1:8001/v1`, model `cm`, and run compression again.
-5. Start the agent. The agent reads local files, calls the model, edits code, runs tests, and stops when tests pass or the step limit is reached.
-6. Show the patch, test output, and context tab.
+3. Set Budget to `400`, click `Rule preview`, and show kept/dropped snippets plus compression.
+4. Click `Qwen preview` with URL `http://127.0.0.1:8001/v1` and model `cm` to show the trained context manager.
+5. Set Budget back to `1200`, then start the agent. The agent reads local files, calls the model, edits code, runs tests, and stops when tests pass or the step limit is reached.
+6. Show the inline Patch, Tests, and Context artifacts in the center workbench.
 7. Briefly explain the design: self-written controller loop, JSON action parser, local tool executor, rule/Qwen context manager, and reproducible evaluation with context-selection metrics.
 
 Recommended task text:
@@ -82,4 +82,4 @@ Recommended test command:
 python -m pytest -q
 ```
 
-Use Rule CM if the remote Qwen service is slow during recording. Use Qwen CM for the manual compression shot so the trained model is still clearly visible in the demo.
+Use Rule CM for the full run if the remote Qwen service is slow during recording. Use `Qwen preview` for the manual compression shot so the trained model is still clearly visible in the demo.

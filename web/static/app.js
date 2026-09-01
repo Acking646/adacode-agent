@@ -6,20 +6,34 @@ let currentWorkspace = $("workspace").value;
 let pollTimer = null;
 let lastRenderKey = "";
 let lastFilesKey = "";
-const textCache = { patch: "", tests: "", context: "" };
+let activeArtifact = "";
+const artifacts = { patch: "", tests: "", context: "" };
 
 function commandToList(text) {
   return text.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((item) => item.replace(/^"|"$/g, "")) || [];
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error || response.statusText);
-  return payload;
+  const { timeoutMs = 0, ...fetchOptions } = options;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      signal: controller?.signal,
+      ...fetchOptions,
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || response.statusText);
+    return payload;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Request timed out. Qwen preview can be skipped if the tunnel or GPU is busy.");
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function setStatus(text, state = "idle") {
@@ -28,30 +42,32 @@ function setStatus(text, state = "idle") {
 }
 
 async function resetDemo() {
-  const payload = await api("/api/demo/reset", { method: "POST", body: "{}" });
+  const payload = await api("/api/demo/reset", { method: "POST", body: "{}", timeoutMs: 10000 });
   currentWorkspace = payload.workspace;
   $("workspace").value = payload.workspace;
   $("task").value = payload.task;
+  lastFilesKey = "";
   renderFiles(payload.files || []);
   $("steps").textContent = "0";
   $("keepCount").textContent = "0";
   $("dropCount").textContent = "0";
   $("patchChars").textContent = "0 chars";
-  updateText("patch", "");
-  updateText("tests", "");
-  updateText("context", "");
   $("jobId").textContent = "no job";
+  artifacts.patch = "";
+  artifacts.tests = "";
+  artifacts.context = "";
+  updateArtifactBadges();
+  closeArtifact();
   lastRenderKey = "";
-  lastFilesKey = "";
   renderThread([]);
   setStatus("Demo reset", "idle");
 }
 
 async function runAgent() {
   $("runAgent").disabled = true;
-  $("compressContext").disabled = true;
+  setPreviewDisabled(true);
   const budget = Number($("tokenBudget").value);
-  setStatus(budget < 800 ? "Queued with a tight context budget" : "Queued", "running");
+  setStatus(budget < 800 ? "Queued with tight context" : "Queued", "running");
   lastRenderKey = "";
   renderThread([], $("task").value);
   const payload = {
@@ -69,52 +85,68 @@ async function runAgent() {
     llm_timeout: 300,
     llm_retries: 5,
   };
-  const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload) });
-  currentJob = started.job_id;
-  $("jobId").textContent = currentJob;
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchJob, 3000);
-  fetchJob();
+  try {
+    const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload), timeoutMs: 10000 });
+    currentJob = started.job_id;
+    $("jobId").textContent = currentJob;
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(fetchJob, 3000);
+    fetchJob();
+  } catch (error) {
+    setStatus(error.message, "failed");
+    $("runAgent").disabled = false;
+    setPreviewDisabled(false);
+  }
 }
 
-async function compressContext() {
-  $("compressContext").disabled = true;
-  setStatus("Compressing context", "running");
+async function previewContext(mode) {
+  setPreviewDisabled(true);
+  const name = mode === "qwen" ? "Qwen SFT" : "Rule";
+  setStatus(`${name} context preview`, "running");
   const payload = {
     workspace: $("workspace").value,
     task: $("task").value,
-    cm_mode: cmMode,
+    cm_mode: mode,
     cm_base_url: $("cmBaseUrl").value,
     cm_model: $("cmModel").value,
     cm_api_key: "EMPTY",
     token_budget: Number($("tokenBudget").value),
   };
   try {
-    const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload) });
+    const timeoutMs = mode === "qwen" ? 45000 : 8000;
+    const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload), timeoutMs });
     renderContextPreview(result);
-    activateTab("context");
+    showArtifact("context");
     setStatus(`${result.manager}: ${result.selected_tokens}/${result.full_tokens} tokens`, "idle");
   } catch (error) {
     setStatus(error.message, "failed");
+    artifacts.context = `${name} preview failed\n${error.message}`;
+    updateArtifactBadges();
+    showArtifact("context");
   } finally {
-    $("compressContext").disabled = false;
+    setPreviewDisabled(false);
   }
+}
+
+function setPreviewDisabled(value) {
+  $("previewRule").disabled = value;
+  $("previewQwen").disabled = value;
 }
 
 async function fetchJob() {
   if (!currentJob) return;
   try {
-    const job = await api(`/api/job?id=${encodeURIComponent(currentJob)}`);
+    const job = await api(`/api/job?id=${encodeURIComponent(currentJob)}`, { timeoutMs: 12000 });
     renderJob(job);
     if (job.status === "done" || job.status === "failed") {
       clearInterval(pollTimer);
       $("runAgent").disabled = false;
-      $("compressContext").disabled = false;
+      setPreviewDisabled(false);
     }
   } catch (error) {
     setStatus(error.message, "failed");
     $("runAgent").disabled = false;
-    $("compressContext").disabled = false;
+    setPreviewDisabled(false);
   }
 }
 
@@ -126,12 +158,14 @@ function renderJob(job) {
   $("keepCount").textContent = trace.selected || 0;
   $("dropCount").textContent = trace.dropped || 0;
   $("patchChars").textContent = `${job.patch_chars || 0} chars`;
-  updateText("patch", job.patch || "");
 
+  artifacts.patch = job.patch || "";
   const before = job.before ? formatTest("Before", job.before) : "";
   const after = job.after ? formatTest("After", job.after) : "";
-  updateText("tests", [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n"));
-  updateText("context", renderContext(trace.actions || []));
+  artifacts.tests = [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n");
+  artifacts.context = renderContext(trace.actions || []);
+  updateArtifactBadges(job);
+  refreshOpenArtifact();
 
   const key = `${job.status}:${trace.steps}:${job.patch_chars || 0}:${job.message || ""}`;
   if (key !== lastRenderKey) {
@@ -141,10 +175,40 @@ function renderJob(job) {
   renderFiles(job.files || []);
 }
 
-function updateText(id, value) {
-  if (textCache[id] === value) return;
-  textCache[id] = value;
-  $(id).textContent = value;
+function updateArtifactBadges(job = null) {
+  $("patchBadge").textContent = artifacts.patch ? `${artifacts.patch.length} chars` : "empty";
+  if (job?.after) {
+    $("testsBadge").textContent = job.after.ok ? "passed" : "failed";
+  } else {
+    $("testsBadge").textContent = artifacts.tests ? "ready" : "waiting";
+  }
+  $("contextBadge").textContent = artifacts.context ? "ready" : "waiting";
+}
+
+function showArtifact(kind) {
+  activeArtifact = kind;
+  const titles = {
+    patch: "Patch",
+    tests: "Test output",
+    context: "Context selection",
+  };
+  $("artifactTitle").textContent = titles[kind] || "Artifact";
+  $("artifactText").textContent = artifacts[kind] || "No data yet.";
+  $("artifactPanel").classList.remove("hidden");
+  document.querySelectorAll(".artifact-chip").forEach((button) => {
+    button.classList.toggle("active", button.dataset.artifact === kind);
+  });
+}
+
+function refreshOpenArtifact() {
+  if (!activeArtifact || $("artifactPanel").classList.contains("hidden")) return;
+  $("artifactText").textContent = artifacts[activeArtifact] || "No data yet.";
+}
+
+function closeArtifact() {
+  activeArtifact = "";
+  $("artifactPanel").classList.add("hidden");
+  document.querySelectorAll(".artifact-chip").forEach((button) => button.classList.remove("active"));
 }
 
 function formatTest(title, payload) {
@@ -239,7 +303,8 @@ function renderContextPreview(result) {
   const drop = result.drop || [];
   $("keepCount").textContent = keep.length;
   $("dropCount").textContent = drop.length;
-  updateText("context", formatContextPreview(result));
+  artifacts.context = formatContextPreview(result);
+  updateArtifactBadges();
   const body = `
     <div class="step-grid">
       <div>
@@ -367,18 +432,11 @@ function renderFiles(files) {
 
 async function openFile(path) {
   const workspace = $("workspace").value || currentWorkspace;
-  const payload = await api(`/api/file?workspace=${encodeURIComponent(workspace)}&path=${encodeURIComponent(path)}`);
-  updateText("patch", payload.content);
-  activateTab("patch");
-}
-
-function activateTab(name) {
-  document.querySelectorAll(".tabs button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.tab === name);
-  });
-  document.querySelectorAll(".tab-body").forEach((body) => {
-    body.classList.toggle("hidden", body.id !== name);
-  });
+  const payload = await api(`/api/file?workspace=${encodeURIComponent(workspace)}&path=${encodeURIComponent(path)}`, { timeoutMs: 8000 });
+  artifacts.patch = payload.content;
+  $("patchBadge").textContent = "file";
+  showArtifact("patch");
+  $("artifactTitle").textContent = `File: ${path}`;
 }
 
 function escapeHtml(text) {
@@ -398,12 +456,14 @@ document.querySelectorAll(".segmented button").forEach((button) => {
   });
 });
 
-document.querySelectorAll(".tabs button").forEach((button) => {
-  button.addEventListener("click", () => activateTab(button.dataset.tab));
+document.querySelectorAll(".artifact-chip").forEach((button) => {
+  button.addEventListener("click", () => showArtifact(button.dataset.artifact));
 });
 
+$("closeArtifact").addEventListener("click", closeArtifact);
 $("resetDemo").addEventListener("click", resetDemo);
 $("runAgent").addEventListener("click", runAgent);
-$("compressContext").addEventListener("click", compressContext);
+$("previewRule").addEventListener("click", () => previewContext("rule"));
+$("previewQwen").addEventListener("click", () => previewContext("qwen"));
 
 resetDemo();

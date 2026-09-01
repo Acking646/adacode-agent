@@ -17,7 +17,7 @@
           </div>
         </div>
 
-        <button id="resetDemo" class="wide ghost" title="Reset the built-in demo workspace">Reset demo</button>
+        <button id="resetDemo" class="wide ghost" title="Reset the demo workspace">Reset demo</button>
 
         <section class="rail-section">
           <div class="section-title">Workspace</div>
@@ -42,7 +42,7 @@
         </section>
 
         <section class="rail-section">
-          <div class="section-title">Context manager</div>
+          <div class="section-title">Run context manager</div>
           <div class="segmented" role="tablist" aria-label="context manager mode">
             <button id="cmRule" class="active" data-mode="rule">Rule</button>
             <button id="cmQwen" data-mode="qwen">Qwen SFT</button>
@@ -65,8 +65,11 @@
               <input id="tokenBudget" type="number" min="200" step="100" value="1200" />
             </label>
           </div>
-          <p class="hint">Use 300-500 for a tight compression preview; use 800+ for an agent run.</p>
-          <button id="compressContext" class="wide ghost" title="Preview one context compression pass">Preview context</button>
+          <p class="hint">Use 400 for preview, then switch back to 1200 before Run.</p>
+          <div class="preview-buttons">
+            <button id="previewRule" class="ghost" title="Preview with the local rule manager">Rule preview</button>
+            <button id="previewQwen" class="ghost" title="Preview with the remote Qwen SFT manager">Qwen preview</button>
+          </div>
         </section>
       </aside>
 
@@ -83,6 +86,20 @@
           </div>
         </header>
 
+        <section class="artifact-bar" aria-label="run artifacts">
+          <button id="showPatch" class="artifact-chip" data-artifact="patch">Patch <span id="patchBadge">empty</span></button>
+          <button id="showTests" class="artifact-chip" data-artifact="tests">Tests <span id="testsBadge">waiting</span></button>
+          <button id="showContext" class="artifact-chip" data-artifact="context">Context <span id="contextBadge">waiting</span></button>
+        </section>
+
+        <section id="artifactPanel" class="artifact-panel hidden">
+          <div class="artifact-head">
+            <strong id="artifactTitle">Artifact</strong>
+            <button id="closeArtifact" class="ghost">Close</button>
+          </div>
+          <pre id="artifactText"></pre>
+        </section>
+
         <section id="thread" class="thread">
           <div class="thread-heading">
             <div>
@@ -95,7 +112,7 @@
             <div class="avatar">AC</div>
             <div class="bubble">
               <div class="message-title">Ready</div>
-              <p>Reset the workspace, preview context compression, then run the local agent.</p>
+              <p>Reset the workspace, preview compression, then run the local agent.</p>
             </div>
           </article>
         </section>
@@ -111,17 +128,6 @@
           </div>
         </footer>
       </main>
-
-      <aside class="right-pane">
-        <div class="tabs">
-          <button class="active" data-tab="patch">Patch</button>
-          <button data-tab="tests">Tests</button>
-          <button data-tab="context">Context</button>
-        </div>
-        <pre id="patch" class="tab-body"></pre>
-        <pre id="tests" class="tab-body hidden"></pre>
-        <pre id="context" class="tab-body hidden"></pre>
-      </aside>
     </div>
 
     <script src="/static/app.js"></script>
