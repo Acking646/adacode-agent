@@ -463,8 +463,19 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"AdaCode-Agent web console: http://{args.host}:{args.port}")
+    server = None
+    selected_port = args.port
+    for port in range(args.port, args.port + 20):
+        try:
+            server = ThreadingHTTPServer((args.host, port), Handler)
+            selected_port = port
+            break
+        except OSError as exc:
+            if port == args.port + 19:
+                raise exc
+            print(f"Port {port} is unavailable; trying {port + 1}...")
+    assert server is not None
+    print(f"AdaCode-Agent web console: http://{args.host}:{selected_port}")
     server.serve_forever()
 
 
