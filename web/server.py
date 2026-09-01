@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from agent.context_manager import ContextManager, TrainedJSONSelectionModel
+from agent.context_manager import ContextManager, RuleBasedSelectionModel, TrainedJSONSelectionModel, estimate_tokens
 from agent.controller import AgentConfig, CodingAgent
 from agent.llm_client import OpenAICompatibleClient
 from agent.memory import MemoryStore
+from agent.schema import ContextCandidate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -151,6 +152,77 @@ def summarize_trace(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             }
         )
     return {"steps": len(actions), "selected": selected, "dropped": dropped, "actions": actions}
+
+
+def build_preview_candidates(workspace: Path, task: str, max_files: int = 24, max_chars: int = 1800) -> List[ContextCandidate]:
+    candidates = [ContextCandidate("task_goal", "task", task, {"status": "active"})]
+    for index, rel in enumerate(list_files(workspace, max_files=max_files), start=1):
+        path = (workspace / rel).resolve()
+        if not path.is_file():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+        except OSError:
+            continue
+        candidates.append(
+            ContextCandidate(
+                f"file_{index:03d}",
+                "file",
+                f"Path: {rel}\n{content}",
+                {"path": rel},
+            )
+        )
+    return candidates
+
+
+def preview_context(payload: Dict[str, Any]) -> Dict[str, Any]:
+    workspace = resolve_workspace(str(payload.get("workspace") or DEMO_WORKSPACE))
+    task = str(payload.get("task") or "")
+    token_budget = int(payload.get("token_budget") or 1200)
+    mode = str(payload.get("cm_mode") or "rule")
+    candidates = build_preview_candidates(workspace, task)
+    selector: Any = RuleBasedSelectionModel()
+    manager_name = "Rule CM"
+    if mode == "qwen":
+        cm_llm = OpenAICompatibleClient(
+            model=str(payload.get("cm_model") or "cm"),
+            api_key=str(payload.get("cm_api_key") or "EMPTY"),
+            base_url=str(payload.get("cm_base_url") or "http://127.0.0.1:8001/v1"),
+            temperature=0.0,
+            top_p=1.0,
+            max_tokens=1024,
+            timeout=300,
+            retries=2,
+        )
+        selector = TrainedJSONSelectionModel(cm_llm)
+        manager_name = "Qwen SFT CM"
+
+    selection = selector.select(task, candidates, token_budget)
+    by_id = {candidate.id: candidate for candidate in candidates}
+    keep = [by_id[item] for item in selection.keep if item in by_id]
+    drop = [candidate for candidate in candidates if candidate.id not in {item.id for item in keep}]
+    full_tokens = sum(estimate_tokens(candidate.content) for candidate in candidates)
+    selected_tokens = sum(estimate_tokens(candidate.content) for candidate in keep)
+    return {
+        "manager": manager_name,
+        "token_budget": token_budget,
+        "full_tokens": full_tokens,
+        "selected_tokens": selected_tokens,
+        "compression": round(1.0 - selected_tokens / max(1, full_tokens), 4),
+        "reason": selection.reason,
+        "keep": [serialize_candidate(candidate) for candidate in keep],
+        "drop": [serialize_candidate(candidate) for candidate in drop],
+    }
+
+
+def serialize_candidate(candidate: ContextCandidate) -> Dict[str, Any]:
+    return {
+        "id": candidate.id,
+        "kind": candidate.kind,
+        "tokens": estimate_tokens(candidate.content),
+        "metadata": candidate.metadata,
+        "content": trim(candidate.content, 1800),
+    }
 
 
 def git_diff(workspace: Path) -> str:
@@ -290,11 +362,22 @@ class Handler(BaseHTTPRequestHandler):
                 job = dict(job)
                 job["trace"] = summarize_trace(parse_trace(trace_path))
                 workspace = job.get("workspace")
-                if workspace:
+                trace_steps = int(job["trace"].get("steps") or 0)
+                if workspace and trace_steps != int(job.get("_last_trace_steps") or -1):
                     workspace_path = Path(str(workspace))
                     job["patch"] = git_diff(workspace_path)
                     job["patch_chars"] = len(str(job["patch"]))
                     job["files"] = list_files(workspace_path)
+                    job["_last_trace_steps"] = trace_steps
+                    with LOCK:
+                        JOBS[job_id].update(
+                            {
+                                "patch": job["patch"],
+                                "patch_chars": job["patch_chars"],
+                                "files": job["files"],
+                                "_last_trace_steps": trace_steps,
+                            }
+                        )
             self.send_json(job)
             return
         if parsed.path == "/api/file":
@@ -318,6 +401,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = self.read_json()
             if parsed.path == "/api/demo/reset":
                 self.send_json(reset_demo_workspace())
+                return
+            if parsed.path == "/api/context/preview":
+                self.send_json(preview_context(payload))
                 return
             if parsed.path == "/api/run":
                 job_id = uuid.uuid4().hex[:12]

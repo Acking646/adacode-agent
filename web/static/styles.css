@@ -206,6 +206,10 @@ textarea:focus {
   min-height: 36px;
 }
 
+#compressContext {
+  margin-top: 2px;
+}
+
 .segmented button.active,
 .tabs button.active {
   border-color: var(--accent);

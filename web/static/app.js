@@ -4,6 +4,9 @@ let cmMode = "rule";
 let currentJob = null;
 let currentWorkspace = $("workspace").value;
 let pollTimer = null;
+let lastRenderKey = "";
+let lastFilesKey = "";
+const textCache = { patch: "", tests: "", context: "" };
 
 function commandToList(text) {
   return text.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((item) => item.replace(/^"|"$/g, "")) || [];
@@ -34,12 +37,19 @@ async function resetDemo() {
   $("tests").textContent = "";
   $("context").textContent = "";
   $("jobId").textContent = "no job";
+  lastRenderKey = "";
+  lastFilesKey = "";
+  textCache.patch = "";
+  textCache.tests = "";
+  textCache.context = "";
   renderThread([]);
 }
 
 async function runAgent() {
   $("runAgent").disabled = true;
+  $("compressContext").disabled = true;
   $("status").textContent = "Queued";
+  lastRenderKey = "";
   renderThread([], $("task").value);
   const payload = {
     workspace: $("workspace").value,
@@ -60,8 +70,32 @@ async function runAgent() {
   currentJob = started.job_id;
   $("jobId").textContent = currentJob;
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchJob, 1200);
+  pollTimer = setInterval(fetchJob, 2000);
   fetchJob();
+}
+
+async function compressContext() {
+  $("compressContext").disabled = true;
+  $("status").textContent = "Compressing context";
+  const payload = {
+    workspace: $("workspace").value,
+    task: $("task").value,
+    cm_mode: cmMode,
+    cm_base_url: $("cmBaseUrl").value,
+    cm_model: $("cmModel").value,
+    cm_api_key: "EMPTY",
+    token_budget: Number($("tokenBudget").value),
+  };
+  try {
+    const result = await api("/api/context/preview", { method: "POST", body: JSON.stringify(payload) });
+    renderContextPreview(result);
+    activateTab("context");
+    $("status").textContent = `${result.manager}: ${result.selected_tokens}/${result.full_tokens} tokens`;
+  } catch (error) {
+    $("status").textContent = error.message;
+  } finally {
+    $("compressContext").disabled = false;
+  }
 }
 
 async function fetchJob() {
@@ -72,10 +106,12 @@ async function fetchJob() {
     if (job.status === "done" || job.status === "failed") {
       clearInterval(pollTimer);
       $("runAgent").disabled = false;
+      $("compressContext").disabled = false;
     }
   } catch (error) {
     $("status").textContent = error.message;
     $("runAgent").disabled = false;
+    $("compressContext").disabled = false;
   }
 }
 
@@ -86,14 +122,24 @@ function renderJob(job) {
   $("keepCount").textContent = trace.selected || 0;
   $("dropCount").textContent = trace.dropped || 0;
   $("patchChars").textContent = `${job.patch_chars || 0} chars`;
-  $("patch").textContent = job.patch || "";
+  updateText("patch", job.patch || "");
 
   const before = job.before ? formatTest("Before", job.before) : "";
   const after = job.after ? formatTest("After", job.after) : "";
-  $("tests").textContent = [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n");
-  $("context").textContent = renderContext(trace.actions || []);
-  renderThread(trace.actions || [], $("task").value, job);
+  updateText("tests", [before, after, job.summary ? `Summary\n${job.summary}` : ""].filter(Boolean).join("\n\n"));
+  updateText("context", renderContext(trace.actions || []));
+  const key = `${job.status}:${trace.steps}:${job.patch_chars || 0}`;
+  if (key !== lastRenderKey) {
+    renderThread(trace.actions || [], $("task").value, job);
+    lastRenderKey = key;
+  }
   renderFiles(job.files || []);
+}
+
+function updateText(id, value) {
+  if (textCache[id] === value) return;
+  textCache[id] = value;
+  $(id).textContent = value;
 }
 
 function formatTest(title, payload) {
@@ -140,6 +186,36 @@ function renderThread(actions, task = "", job = null) {
   thread.scrollTop = thread.scrollHeight;
 }
 
+function renderContextPreview(result) {
+  const keep = result.keep || [];
+  const drop = result.drop || [];
+  $("keepCount").textContent = keep.length;
+  $("dropCount").textContent = drop.length;
+  const lines = [
+    `${result.manager}`,
+    `budget: ${result.token_budget}`,
+    `tokens: ${result.selected_tokens}/${result.full_tokens}`,
+    `compression: ${result.compression}`,
+    `reason: ${result.reason || "-"}`,
+    "",
+    "KEEP",
+    ...keep.map(formatCandidate),
+    "",
+    "DROP",
+    ...drop.map(formatCandidate),
+  ];
+  updateText("context", lines.join("\n"));
+  const body = `tokens ${result.selected_tokens}/${result.full_tokens}, compression ${result.compression}\nkeep ${keep.length}, drop ${drop.length}`;
+  renderThread([], $("task").value);
+  $("thread").appendChild(message("assistant", `Manual compression: ${result.manager}`, body));
+  $("thread").scrollTop = $("thread").scrollHeight;
+}
+
+function formatCandidate(item) {
+  const path = item.metadata?.path ? ` ${item.metadata.path}` : "";
+  return `- ${item.id} [${item.kind}]${path} (${item.tokens} tokens)\n${item.content}`;
+}
+
 function message(role, title, body, html = false) {
   const article = document.createElement("article");
   article.className = `message ${role}`;
@@ -182,6 +258,9 @@ function renderContext(actions) {
 
 function renderFiles(files) {
   const list = $("fileList");
+  const key = files.join("\n");
+  if (key === lastFilesKey) return;
+  lastFilesKey = key;
   list.innerHTML = "";
   if (!files.length) {
     const empty = document.createElement("span");
@@ -238,5 +317,6 @@ document.querySelectorAll(".tabs button").forEach((button) => {
 
 $("resetDemo").addEventListener("click", resetDemo);
 $("runAgent").addEventListener("click", runAgent);
+$("compressContext").addEventListener("click", compressContext);
 
 resetDemo();
