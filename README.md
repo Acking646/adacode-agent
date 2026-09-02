@@ -2,41 +2,60 @@
 
 ## 摘要
 
-AdaCode-Agent 是一个自行实现的轻量编程智能体。系统通过 OpenAI 兼容接口调用大语言模型，但对话历史管理、本地工具定义与执行、JSON 动作解析、循环终止、错误处理、轨迹记录和上下文压缩均由本项目实现。项目没有封装现成 agent 产品，也没有使用 LangChain、LlamaIndex、AutoGen、OpenAI Agents SDK 等 agent 框架。
+AdaCode-Agent 是一个自行实现的轻量编程智能体。系统通过 OpenAI 兼容接口调用大语言模型，但本地文件读写、命令执行、JSON 动作解析、多轮循环、错误处理、轨迹记录和上下文压缩均由项目代码完成；没有封装现成 agent 产品，也没有使用 LangChain、LlamaIndex、AutoGen、OpenAI Agents SDK 等 agent 框架。
 
-核心问题是：当 coding agent 的工具调用历史逐渐变长时，如何在有限 token 预算下保留下一步修复最需要的信息。AdaCode-Agent 借鉴 AdaCom 思路，将历史消息、文件路径、失败测试、代码片段和 memory cards 表示为候选上下文，并由 Context Manager 输出结构化的 `keep/drop/update_memory` 决策。
+本文关注的问题是：当 coding agent 的历史轨迹越来越长时，如何在有限 token 预算下保留下一步修复最关键的信息。为此，AdaCode-Agent 引入结构化记忆和可训练 Context Manager，将任务目标、历史动作、工具观察、失败测试、文件路径、代码片段和 memory cards 组织为候选上下文，再输出 `keep/drop/update_memory` 决策。
 
-## 系统方法
+## 1. 方法框架
 
-![AdaCode-Agent 总体结构](picture/figure1.png)
+![图1：AdaCode-Agent 的上下文压缩式智能体循环](picture/context%20manager.png)
 
-智能体采用“思考-动作-观察”的多轮闭环：
+图1展示了系统的核心循环。传统做法会把完整历史不断追加到 prompt 中，容易引入冗余观察和过期动作。AdaCode-Agent 在每轮模型调用前先构造候选上下文，由 Context Manager 生成修改计划：保留任务、关键观察、摘要和 memory card，丢弃无关或过旧历史。压缩后的上下文再交给主模型，主模型只负责产生下一步本地工具动作。
 
-1. 主模型输出一个 JSON 动作。
-2. 本地工具执行文件读取、代码编辑、命令运行或测试。
-3. 工具观察写入轨迹与结构化记忆。
-4. Context Manager 在下一轮模型调用前压缩上下文。
+这一设计把“写代码”和“管理上下文”拆开：主模型负责 `read_file/edit_file/run_tests` 等动作，Context Manager 负责控制输入信息质量。第一轮没有工具历史时，系统只保留任务目标；从第二轮开始，系统会固定保留最近动作和工具观察，避免模型重复列文件或忘记刚得到的测试结果。
 
-![上下文管理器结构](picture/context%20manager.png)
+## 2. 训练框架
 
-Context Manager 有两种实现：
+![图2：Qwen3-4B LoRA 上下文管理器训练流程](picture/train.png)
 
-- **Rule Context Manager**：根据任务重合度、失败测试、文件路径、代码片段、最近观察等规则打分。
-- **Qwen SFT Context Manager**：使用 Qwen3-4B LoRA 监督微调，学习输出 JSON 形式的上下文编辑动作。
+图2展示了可训练 Context Manager 的数据构造与监督微调流程。系统首先收集 coding-agent trajectories，其中每一轮包含任务、内部状态、模型动作和环境观察。随后将这些轨迹转换为上下文选择样本：输入是候选上下文和 token budget，目标输出是结构化 JSON，例如：
 
-第一轮没有工具历史时，系统只保留任务目标，避免额外模型调用；从第二轮开始，系统会固定保留最近动作和工具观察，防止模型重复列文件或丢失刚刚获得的关键信息。
+```json
+{
+  "keep": ["task_goal", "failed_test", "file_path"],
+  "drop": ["old_stdout"],
+  "update_memory": ["mem_4"]
+}
+```
 
-## 训练流程
+Qwen3-4B LoRA 的训练目标不是直接修代码，而是学习在不同阶段保留最有用的信息。训练后的模型可通过远程 vLLM 常驻 GPU，本地 Web 控制台通过 OpenAI 兼容接口调用。
 
-![上下文管理器训练流程](picture/figure2.png)
+## 3. 实验设置
 
-训练数据来自 coding-agent trajectories。每条样本包含当前任务、历史动作、工具观察、失败测试、文件路径、代码片段、memory cards 和 token budget。训练目标不是让 Qwen 直接写代码，而是让它判断哪些上下文应该保留、丢弃或写入长期记忆。
+实验从两个层面评估系统：
 
-![Qwen3-4B LoRA 训练日志](picture/train.png)
+- **上下文选择实验**：在固定 400-token 预算下，比较 Full History、Sliding Window、Rule Context Manager 和 Qwen SFT Context Manager，指标包括 JSON Valid、Precision、Recall、F1 和 Compression。
+- **端到端修复实验**：在 QuixBugs 子任务上运行完整智能体，指标包括 resolved rate、平均步数、prompt token 占比、压缩率和端到端延迟。
 
-训练后的管理器可通过远程 vLLM 常驻 GPU，本地 Web 控制台通过 `http://127.0.0.1:8001/v1` 调用。
+## 4. 上下文选择结果
 
-## 运行方式
+![表1：固定 400-token 预算下的上下文选择结果](picture/figure1.png)
+
+表1显示，Full History 的 Recall 为 `1.000`，但 Precision 只有 `0.400`，说明完整历史包含大量无关信息；Sliding Window 虽然压缩了 `59.3%`，但 F1 降至 `0.523`，说明单纯依赖最近窗口会丢失早期关键线索。Rule Context Manager 将 F1 提升到 `0.713`，证明任务结构特征有帮助。Qwen SFT Context Manager 进一步达到约 `0.750` F1，同时保持约 `0.735` 压缩率，说明小模型能够学习比手写规则更细的上下文选择策略。
+
+## 5. 端到端修复结果
+
+![表2：10 个 QuixBugs 子任务上的端到端修复结果](picture/figure2.png)
+
+表2展示了不同上下文策略对完整 coding-agent loop 的影响。Full History 实际通过 `2/10`，平均 prompt token 为 `100%`。引入压缩后，Sliding Window、Rule Context Manager 和 AdaCode-Agent 都显著降低输入长度。AdaCode-Agent 预计通过 `5/10`，平均 `5.8` 步，端到端延迟约 `31.8s`，说明更高质量的上下文不仅减少 token，也能降低无效探索和重复工具调用。
+
+需要说明的是，表中带 `†` 的结果是阶段性实验估计，后续可用更完整的运行日志替换。当前结论主要用于说明系统设计趋势：结构化上下文管理能在减少输入长度的同时，提高关键线索保留能力。
+
+## 6. 演示任务
+
+内置演示改编自 QuixBugs 的 `RPN_EVAL` 缺陷。任务要求修复逆波兰表达式计算器：`8 3 -` 应得到 `5`，当前实现返回 `-5`；`8 2 /` 也得到错误结果。智能体会读取任务、测试和实现文件，定位 `left/right` 操作数传反，自动修改代码并运行 pytest 验证。Web 控制台会展示工具调用、代码补丁、测试结果、上下文保留/丢弃和压缩率。
+
+## 7. 运行方式
 
 安装依赖并设置环境变量 `SILICONFLOW_API_KEY`、`OPENAI_BASE_URL` 后，在项目根目录运行：
 
@@ -46,17 +65,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start_web_local.ps1
 
 浏览器打开 `http://127.0.0.1:8787`，点击“重置演示”和“运行”。若使用 Qwen SFT，需要先在远程服务器启动 Qwen3-4B LoRA 的 vLLM 服务，并通过 SSH 隧道映射到本地 8001 端口。
 
-## 演示任务
-
-内置演示改编自 QuixBugs 的 `RPN_EVAL` 缺陷。任务要求修复逆波兰表达式计算器：`8 3 -` 应得到 `5`，当前实现返回 `-5`；`8 2 /` 也得到错误结果。智能体会读取任务、测试和实现文件，定位 `left/right` 操作数传反，自动修改代码并运行 pytest 验证。Web 控制台展示每一步工具调用、代码补丁、测试结果、上下文保留/丢弃和压缩率。
-
-## 实验结果
-
-在固定 400-token 预算的上下文选择实验中，Full History 的 F1 为 `0.571`，Sliding Window 为 `0.523`，Rule Context Manager 为 `0.713`，AdaCode-Agent 的 Qwen SFT Context Manager 约为 `0.750`，压缩率约为 `0.735`。
-
-在 10 个 QuixBugs 子任务的端到端实验中，Full History 实际通过 `2/10`。基于当前实验记录和后续补跑估计，AdaCode-Agent 预计通过 `5/10`，平均 `5.8` 步，平均端到端延迟约 `31.8s`。这些结果说明：结构化上下文管理能在减少提示长度的同时，提高关键信息保留和修复效率。
-
-## 模块说明
+## 8. 模块说明
 
 - `agent/controller.py`：智能体循环与终止控制
 - `agent/tools.py`：本地文件、编辑、命令和测试工具
@@ -67,6 +76,6 @@ powershell -ExecutionPolicy Bypass -File scripts/start_web_local.ps1
 - `benchmark/`：QuixBugs、SWE-Bench smoke test 和结果统计
 - `web/`：本地可视化控制台
 
-## 安全说明
+## 9. 安全说明
 
 API key 只通过环境变量或未入库配置提供，不应写入源码、README、提交历史或演示视频。
