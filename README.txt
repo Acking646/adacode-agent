@@ -17,5 +17,4 @@ powershell -ExecutionPolicy Bypass -File scripts/start_web_local.ps1
 演示与实验：
 内置演示改编自 QuixBugs 的 RPN_EVAL 缺陷。智能体会读取测试和实现，发现逆波兰表达式计算器把 left/right 操作数传反，自动修改代码并运行 pytest 验证。Web 控制台展示补丁、测试输出、上下文保留/丢弃和压缩率。初步实验：400-token 上下文选择中 F1 约 0.750、压缩率约 0.735；10 个 QuixBugs 子任务端到端预计通过 5/10，平均 5.8 步，延迟约 31.8 秒。
 
-说明：
-API key 只通过环境变量提供，不写入仓库、README 或视频。
+

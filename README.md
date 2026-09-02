@@ -76,6 +76,3 @@ powershell -ExecutionPolicy Bypass -File scripts/start_web_local.ps1
 - `benchmark/`：QuixBugs、SWE-Bench smoke test 和结果统计
 - `web/`：本地可视化控制台
 
-## 9. 安全说明
-
-API key 只通过环境变量或未入库配置提供，不应写入源码、README、提交历史或演示视频。
