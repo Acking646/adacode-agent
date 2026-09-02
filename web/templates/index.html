@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AdaCode Workbench</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260901-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260902-1" />
   </head>
   <body>
     <div class="workbench">
@@ -13,11 +13,11 @@
           <div class="mark">AC</div>
           <div>
             <h1>AdaCode</h1>
-            <p>本地编程智能体</p>
+            <p>本地修复工作台</p>
           </div>
         </div>
 
-        <button id="resetDemo" class="wide ghost" title="恢复演示工作区">重置演示</button>
+        <button id="resetDemo" class="wide ghost" title="恢复演示工作区">重置案例</button>
 
         <section class="rail-section">
           <div class="section-title">工作区</div>
@@ -69,10 +69,10 @@
             压缩预览预算
             <input id="previewBudget" type="number" min="200" step="100" value="400" />
           </label>
-          <p class="hint">预览使用紧预算展示压缩效果，正式运行保留更完整的操作历史。</p>
+          <p class="hint">预览使用紧预算；正式运行会保留最近操作记录。</p>
           <div class="preview-buttons">
-            <button id="previewRule" class="ghost" title="使用本地规则模型预览">规则预览</button>
-            <button id="previewQwen" class="ghost" title="使用远程 Qwen SFT 模型预览">Qwen 预览</button>
+            <button id="previewRule" class="ghost" title="使用本地规则模型预览">预览规则</button>
+            <button id="previewQwen" class="ghost" title="使用远程 Qwen SFT 模型预览">预览 Qwen</button>
           </div>
         </section>
       </aside>
@@ -80,8 +80,9 @@
       <main class="center-pane">
         <header class="topbar">
           <div>
-            <div class="overline">当前任务</div>
+            <div class="overline">会话</div>
             <strong id="status"><span class="status-dot idle"></span>就绪</strong>
+            <div id="subStatus" class="sub-status">等待输入</div>
           </div>
           <div class="metrics">
             <div><span>步骤</span><strong id="steps">0</strong></div>
@@ -91,7 +92,7 @@
         </header>
 
         <section class="artifact-bar" aria-label="run artifacts">
-          <button id="showPatch" class="artifact-chip" data-artifact="patch">代码补丁 <span id="patchBadge">暂无</span></button>
+          <button id="showPatch" class="artifact-chip" data-artifact="patch">补丁 <span id="patchBadge">暂无</span></button>
           <button id="showTests" class="artifact-chip" data-artifact="tests">测试结果 <span id="testsBadge">等待</span></button>
           <button id="showContext" class="artifact-chip" data-artifact="context">上下文 <span id="contextBadge">等待</span></button>
         </section>
@@ -107,8 +108,8 @@
         <section id="thread" class="thread">
           <div class="thread-heading">
             <div>
-              <span>执行时间线</span>
-              <strong>智能体循环</strong>
+              <span>执行记录</span>
+              <strong>Agent loop</strong>
             </div>
             <code id="loopState">等待</code>
           </div>
@@ -116,25 +117,25 @@
             <div class="avatar">AC</div>
             <div class="bubble">
               <div class="message-title">准备就绪</div>
-              <p>智能体将读取本地文件、执行命令、修改代码，并在每轮模型调用前压缩上下文。</p>
+              <p>等待任务。运行后会显示文件读取、编辑、测试和上下文选择记录。</p>
             </div>
           </article>
         </section>
 
         <footer class="composer">
-          <textarea id="task" rows="3" placeholder="描述需要智能体完成的编程任务……"></textarea>
+          <textarea id="task" rows="3" placeholder="输入要修复的问题，或保留默认案例"></textarea>
           <div class="composer-actions">
             <div class="run-meta">
               <span title="改编自 QuixBugs 自动程序修复基准">QuixBugs · RPN_EVAL</span>
               <span id="jobId">尚未运行</span>
               <span id="cmModeLabel">规则上下文</span>
             </div>
-            <button id="runAgent" class="primary" title="运行编程智能体">运行</button>
+            <button id="runAgent" class="primary" title="运行编程智能体">开始</button>
           </div>
         </footer>
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260901-4"></script>
+    <script src="/static/app.js?v=20260902-1"></script>
   </body>
 </html>

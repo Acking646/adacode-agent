@@ -5,6 +5,7 @@ let currentJob = null;
 let currentWorkspace = $("workspace").value;
 let currentTask = "";
 let pollTimer = null;
+let polling = false;
 let lastRenderKey = "";
 let lastFilesKey = "";
 let activeArtifact = "";
@@ -60,10 +61,12 @@ async function api(path, options = {}) {
   }
 }
 
-function setStatus(text, state = "idle") {
+function setStatus(text, state = "idle", detail = "") {
   $("status").innerHTML = `<span class="status-dot ${state}"></span>${escapeHtml(text)}`;
   const loopState = $("loopState");
   if (loopState) loopState.textContent = stateLabels[state] || state;
+  const subStatus = $("subStatus");
+  if (subStatus) subStatus.textContent = detail || (state === "running" ? "正在执行本地工具和模型调用" : "等待输入");
 }
 
 function reportUiError(error) {
@@ -107,7 +110,7 @@ async function resetDemo() {
 }
 
 async function runAgent() {
-  $("runAgent").disabled = true;
+  setBusy(true);
   setPreviewDisabled(true);
   try {
     const submittedTask = $("task").value.trim();
@@ -115,7 +118,7 @@ async function runAgent() {
     currentTask = submittedTask;
     const budget = Math.max(800, Number($("tokenBudget").value) || 1600);
     $("tokenBudget").value = String(budget);
-    setStatus("任务已提交", "running");
+    setStatus("任务已提交", "running", "正在创建运行会话");
     lastRenderKey = "";
     renderThread([], currentTask);
     const payload = {
@@ -139,12 +142,11 @@ async function runAgent() {
     const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload), timeoutMs: 10000 });
     currentJob = started.job_id;
     $("jobId").textContent = currentJob;
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(fetchJob, 3000);
-    fetchJob();
+    if (pollTimer) clearTimeout(pollTimer);
+    queuePoll(180);
   } catch (error) {
     setStatus(error.message, "failed");
-    $("runAgent").disabled = false;
+    setBusy(false);
     setPreviewDisabled(false);
   }
 }
@@ -155,7 +157,7 @@ async function previewContext(mode) {
   try {
     const previewTask = $("task").value.trim() || currentTask;
     if (!previewTask) throw new Error("请先输入任务描述。");
-    setStatus(`正在生成${name}压缩预览`, "running");
+    setStatus(`正在生成${name}压缩预览`, "running", "正在读取候选上下文");
     const payload = {
       workspace: $("workspace").value,
       task: previewTask,
@@ -188,20 +190,36 @@ function setPreviewDisabled(value) {
 }
 
 async function fetchJob() {
-  if (!currentJob) return;
+  if (!currentJob || polling) return;
+  polling = true;
   try {
     const job = await api(`/api/job?id=${encodeURIComponent(currentJob)}`, { timeoutMs: 12000 });
     renderJob(job);
     if (job.status === "done" || job.status === "failed") {
-      clearInterval(pollTimer);
-      $("runAgent").disabled = false;
+      if (pollTimer) clearTimeout(pollTimer);
+      setBusy(false);
       setPreviewDisabled(false);
+    } else {
+      queuePoll((job.trace?.steps || 0) < 2 ? 900 : 1800);
     }
   } catch (error) {
     setStatus(error.message, "failed");
-    $("runAgent").disabled = false;
+    setBusy(false);
     setPreviewDisabled(false);
+  } finally {
+    polling = false;
   }
+}
+
+function queuePoll(delayMs) {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(fetchJob, delayMs);
+}
+
+function setBusy(value) {
+  $("runAgent").disabled = value;
+  $("runAgent").textContent = value ? "运行中" : "开始";
+  document.body.classList.toggle("is-running", value);
 }
 
 function renderJob(job) {
@@ -209,7 +227,7 @@ function renderJob(job) {
   const state = job.status === "failed" ? "failed" : job.status === "running" ? "running" : "idle";
   const statusText = jobLabels[job.status] || job.status;
   const messageText = messageLabels[job.message] || job.message || "";
-  setStatus(`${statusText}${messageText ? `：${messageText}` : ""}`, state);
+  setStatus(`${statusText}${messageText ? `：${messageText}` : ""}`, state, job.elapsed_seconds ? `已运行 ${job.elapsed_seconds} 秒` : "");
   $("steps").textContent = trace.steps || 0;
   $("keepCount").textContent = trace.selected || 0;
   $("dropCount").textContent = trace.dropped || 0;
@@ -278,7 +296,7 @@ function renderThread(actions, task = "", job = null) {
   const shouldFollow = !activeArtifact && thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
   thread.innerHTML = "";
   thread.appendChild(threadHeading(job));
-  thread.appendChild(message("assistant", "准备就绪", "我会读取本地文件、执行工具、修改代码、运行测试，并在每次模型调用前压缩上下文。"));
+  thread.appendChild(message("assistant", "准备就绪", "等待任务。运行后会显示文件读取、编辑、测试和上下文选择记录。"));
   if (task.trim()) {
     thread.appendChild(message("user", "编程任务", task.trim()));
   }
@@ -346,11 +364,11 @@ function stepCard(action) {
         </div>
       </div>
     </div>
-    <details open>
+    <details>
       <summary>工具参数</summary>
       <pre class="tool-args">${escapeHtml(args)}</pre>
     </details>
-    <details>
+    <details ${action.ok ? "" : "open"}>
       <summary>执行结果</summary>
       <pre class="tool-output">${escapeHtml(action.output || "")}</pre>
     </details>
@@ -481,7 +499,10 @@ function localizeReason(reason) {
     .replace("Rule-based reward scoring selected compact context.", "规则奖励评分选择了紧凑上下文。")
     .replace("SFT manager selected context.", "SFT 模型完成了上下文选择。")
     .replace("Context manager failed", "上下文管理器失败")
-    .replace("fell back to rule scoring", "已回退到规则评分");
+    .replace("fell back to rule scoring", "已回退到规则评分")
+    .replace("No tool history yet; skipped Qwen compression for the first step.", "首轮尚无工具历史，仅保留任务目标。")
+    .replace("Recent tool observations were pinned to avoid repeated actions.", "已固定保留最近动作和工具观察，避免重复操作。")
+    .replace("Keep task, recent failures, code patches, and relevant tool observations under the token budget.", "在预算内保留任务、近期错误、补丁和相关工具观察。");
 }
 
 function renderFiles(files) {
